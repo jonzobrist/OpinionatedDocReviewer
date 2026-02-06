@@ -11,6 +11,7 @@
 - [x] System status endpoint (redis/openai)
 - [x] UI banner for missing Redis/OpenAI key
 - [x] Redis helper script for start/stop/status
+- [x] CORS strategy documented + configurable settings
 
 ## Polished UI
 - [x] Redesign UI per new aesthetic

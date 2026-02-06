@@ -7,7 +7,13 @@ export function getApiBase() {
       return fromStorage;
     }
   }
-  return process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:8006/api';
+  if (process.env.NEXT_PUBLIC_API_BASE) {
+    return process.env.NEXT_PUBLIC_API_BASE;
+  }
+  if (typeof window !== 'undefined') {
+    return `${window.location.origin}/api`;
+  }
+  return 'http://localhost:8006/api';
 }
 
 export function setApiBase(value: string) {

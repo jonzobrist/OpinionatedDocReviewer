@@ -18,9 +18,11 @@ def load_config_file() -> dict:
         return {}
 
 
-def parse_csv(value: str | None, default: list[str]) -> list[str]:
-    if not value:
+def parse_csv(value: str | list[str] | None, default: list[str]) -> list[str]:
+    if value is None:
         return default
+    if isinstance(value, list):
+        return [item for item in (item.strip() for item in value) if item]
     items = [item.strip() for item in value.split(",")]
     return [item for item in items if item]
 
