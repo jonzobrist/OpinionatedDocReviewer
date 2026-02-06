@@ -1,0 +1,27 @@
+[project]
+name = "opinionated-doc-reviewer-backend"
+version = "0.1.0"
+description = "Backend API for OpinionatedDocReviewer"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn>=0.27",
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+  "httpx>=0.26",
+  "sqlalchemy>=2.0",
+  "openai>=1.40.0",
+  "redis>=5.0.4",
+  "rq>=1.16.2",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-q"
+pythonpath = ["."]
