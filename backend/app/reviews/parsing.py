@@ -19,14 +19,29 @@ def parse_bullets(text: str) -> list[str]:
 
 
 def extract_excerpt(content: str, comment: str) -> tuple[str | None, int, int]:
-    match = re.search(r"\"([^\"]{5,200})\"", comment)
-    if not match:
-        return None, 0, 0
-    excerpt = match.group(1)
-    index = content.find(excerpt)
-    if index == -1:
-        return excerpt, 0, 0
-    return excerpt, index, index + len(excerpt)
+    for pattern in (r"\"([^\"]{5,200})\"", r"'([^']{5,200})'"):
+        match = re.search(pattern, comment)
+        if not match:
+            continue
+        excerpt = match.group(1).strip()
+        index = content.find(excerpt)
+        if index != -1:
+            return excerpt, index, index + len(excerpt)
+        lowered = content.lower().find(excerpt.lower())
+        if lowered != -1:
+            return content[lowered : lowered + len(excerpt)], lowered, lowered + len(excerpt)
+
+    # Fallback: use a short phrase from comment text and search in content.
+    cleaned = re.sub(r"[^\w\s]", " ", comment).strip()
+    tokens = [tok for tok in cleaned.split() if len(tok) > 3]
+    if len(tokens) >= 3:
+        phrase = " ".join(tokens[:6])
+        lowered = content.lower().find(phrase.lower())
+        if lowered != -1:
+            excerpt = content[lowered : lowered + len(phrase)]
+            return excerpt, lowered, lowered + len(excerpt)
+
+    return None, 0, 0
 
 
 def persist_comment_payloads(

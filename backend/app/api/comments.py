@@ -13,13 +13,14 @@ router = APIRouter(prefix="/comments", tags=["comments"])
 @router.get("", response_model=list[CommentRead])
 def list_by_version(
     document_version_id: int,
+    review_job_id: int | None = None,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
 ) -> list[CommentRead]:
     version = get_version(db, tenant_id, document_version_id)
     if not version:
         raise HTTPException(status_code=404, detail="Document version not found")
-    return list_comments_by_version(db, tenant_id, document_version_id)
+    return list_comments_by_version(db, tenant_id, document_version_id, review_job_id)
 
 
 @router.post("", response_model=CommentRead, status_code=201)

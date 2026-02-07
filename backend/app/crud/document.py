@@ -53,3 +53,60 @@ def delete_document(db: Session, tenant_id: str, document_id: int) -> bool:
     db.delete(doc)
     db.commit()
     return True
+
+
+def list_document_library(db: Session, tenant_id: str) -> list[dict]:
+    docs = list_documents(db, tenant_id)
+    entries: list[dict] = []
+    for doc in docs:
+        latest_version = (
+            db.query(models.DocumentVersion)
+            .filter(
+                models.DocumentVersion.tenant_id == tenant_id,
+                models.DocumentVersion.document_id == doc.id,
+            )
+            .order_by(models.DocumentVersion.created_at.desc(), models.DocumentVersion.id.desc())
+            .first()
+        )
+        latest_review = None
+        if latest_version:
+            latest_review = (
+                db.query(models.ReviewJob)
+                .filter(
+                    models.ReviewJob.tenant_id == tenant_id,
+                    models.ReviewJob.document_version_id == latest_version.id,
+                )
+                .order_by(models.ReviewJob.created_at.desc(), models.ReviewJob.id.desc())
+                .first()
+            )
+        latest_version_created = latest_version.created_at if latest_version else None
+        latest_review_completed = latest_review.completed_at if latest_review else None
+        latest_review_created = latest_review.created_at if latest_review else None
+        needs_review = bool(
+            latest_version
+            and (
+                latest_review is None
+                or latest_review.status != "completed"
+                or (
+                    latest_review_completed is not None
+                    and latest_review_completed < latest_version_created
+                )
+            )
+        )
+        entries.append(
+            {
+                "id": doc.id,
+                "tenant_id": doc.tenant_id,
+                "title": doc.title,
+                "created_at": doc.created_at,
+                "latest_version_id": latest_version.id if latest_version else None,
+                "latest_version_label": latest_version.version_label if latest_version else None,
+                "latest_version_created_at": latest_version_created,
+                "latest_review_job_id": latest_review.id if latest_review else None,
+                "latest_review_status": latest_review.status if latest_review else None,
+                "latest_review_created_at": latest_review_created,
+                "latest_review_completed_at": latest_review_completed,
+                "needs_review": needs_review,
+            }
+        )
+    return entries

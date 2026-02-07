@@ -8,6 +8,7 @@ def create_comment(db: Session, tenant_id: str, data: CommentCreate) -> models.C
     comment = models.Comment(
         tenant_id=tenant_id,
         document_version_id=data.document_version_id,
+        review_job_id=data.review_job_id,
         persona_id=data.persona_id,
         text=data.text,
         start_offset=data.start_offset,
@@ -21,14 +22,18 @@ def create_comment(db: Session, tenant_id: str, data: CommentCreate) -> models.C
 
 
 def list_comments_by_version(
-    db: Session, tenant_id: str, document_version_id: int
+    db: Session,
+    tenant_id: str,
+    document_version_id: int,
+    review_job_id: int | None = None,
 ) -> list[models.Comment]:
-    return (
+    query = (
         db.query(models.Comment)
         .filter(
             models.Comment.tenant_id == tenant_id,
             models.Comment.document_version_id == document_version_id,
         )
-        .order_by(models.Comment.id.asc())
-        .all()
     )
+    if review_job_id is not None:
+        query = query.filter(models.Comment.review_job_id == review_job_id)
+    return query.order_by(models.Comment.id.asc()).all()

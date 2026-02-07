@@ -8,6 +8,7 @@ def test_review_worker_generates_comments(monkeypatch) -> None:
     db = SessionLocal()
     try:
         tenant_id = "tenant-test"
+        monkeypatch.setattr("app.reviews.worker.settings.DOC_REPO_ENABLED", False)
         seed_default_personas(tenant_id=tenant_id, db=db)
 
         doc = models.Document(tenant_id=tenant_id, title="Test Doc")
@@ -34,10 +35,13 @@ def test_review_worker_generates_comments(monkeypatch) -> None:
         db.commit()
         db.refresh(job)
 
-        def _fake_generate_comments(persona, content):
-            return ["- Review: clarify \"world\" term."]
+        def _fake_generate_comments_for_spec(persona, content):
+            return ['Review: clarify "world" term.']
 
-        monkeypatch.setattr("app.reviews.worker.generate_comments", _fake_generate_comments)
+        monkeypatch.setattr(
+            "app.reviews.worker.generate_comments_for_spec",
+            _fake_generate_comments_for_spec,
+        )
 
         run_review_job(job.id, tenant_id)
 
@@ -48,5 +52,6 @@ def test_review_worker_generates_comments(monkeypatch) -> None:
         )
         assert len(comments) > 0
         assert comments[0].excerpt in ("world", None)
+        assert comments[0].review_job_id == job.id
     finally:
         db.close()

@@ -5,6 +5,21 @@ export type DocumentRead = {
   created_at: string;
 };
 
+export type DocumentLibraryEntry = {
+  id: number;
+  tenant_id: string;
+  title: string;
+  created_at: string;
+  latest_version_id: number | null;
+  latest_version_label: string | null;
+  latest_version_created_at: string | null;
+  latest_review_job_id: number | null;
+  latest_review_status: string | null;
+  latest_review_created_at: string | null;
+  latest_review_completed_at: string | null;
+  needs_review: boolean;
+};
+
 export type DocumentVersionRead = {
   id: number;
   tenant_id: string;
@@ -53,6 +68,7 @@ export type CommentRead = {
   tenant_id: string;
   persona_id: number;
   document_version_id: number;
+  review_job_id: number | null;
   text: string;
   start_offset: number;
   end_offset: number;
@@ -65,5 +81,7 @@ export type ReviewJobRead = {
   tenant_id: string;
   document_version_id: number;
   status: string;
+  trigger: string;
+  completed_at: string | null;
   created_at: string;
 };

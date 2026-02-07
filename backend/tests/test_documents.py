@@ -30,6 +30,14 @@ def test_document_and_versions_crud(client) -> None:
     assert create_version.status_code == 201
     version = create_version.json()
 
+    library_resp = client.get("/api/documents/library", headers=headers)
+    assert library_resp.status_code == 200
+    library_items = library_resp.json()
+    assert len(library_items) == 1
+    entry = library_items[0]
+    assert entry["latest_version_id"] == version["id"]
+    assert entry["needs_review"] is True
+
     list_versions = client.get(f"/api/documents/{doc_id}/versions", headers=headers)
     assert list_versions.status_code == 200
     assert len(list_versions.json()) == 1

@@ -58,11 +58,11 @@ start_frontend() {
   fi
 
   echo "Starting frontend on port $FRONTEND_PORT"
-  if command -v bun > /dev/null 2>&1; then
-    (cd "$FRONTEND_DIR" && PORT="$FRONTEND_PORT" UV_CACHE_DIR="$UV_CACHE_DIR" nohup bun run dev > "$LOG_DIR/frontend.log" 2>&1 & echo $! > "$frontend_pid_file")
-  else
-    (cd "$FRONTEND_DIR" && PORT="$FRONTEND_PORT" UV_CACHE_DIR="$UV_CACHE_DIR" nohup npm run dev > "$LOG_DIR/frontend.log" 2>&1 & echo $! > "$frontend_pid_file")
+  if ! command -v bun > /dev/null 2>&1; then
+    echo "Bun is required to run the frontend. Please install bun first."
+    return 1
   fi
+  (cd "$FRONTEND_DIR" && PORT="$FRONTEND_PORT" UV_CACHE_DIR="$UV_CACHE_DIR" nohup bun run dev > "$LOG_DIR/frontend.log" 2>&1 & echo $! > "$frontend_pid_file")
 }
 
 start_worker() {

@@ -23,7 +23,13 @@ def write_and_commit(repo_path: Path, content: str, message: str) -> str:
     doc_path = repo_path / "document.md"
     doc_path.write_text(content, encoding="utf-8")
     _run_git(["add", str(doc_path.name)], cwd=repo_path)
-    _run_git(["commit", "-m", message], cwd=repo_path)
+    try:
+        _run_git(["commit", "-m", message], cwd=repo_path)
+    except subprocess.CalledProcessError as exc:
+        stdout = (exc.stdout or "").lower()
+        stderr = (exc.stderr or "").lower()
+        if "nothing to commit" not in stdout and "nothing to commit" not in stderr:
+            raise
     sha = _run_git(["rev-parse", "HEAD"], cwd=repo_path).strip()
     return sha
 

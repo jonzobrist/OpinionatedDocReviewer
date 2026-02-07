@@ -84,6 +84,8 @@ class ReviewJob(Base):
         Integer, ForeignKey("document_versions.id", ondelete="CASCADE"), index=True
     )
     status: Mapped[str] = mapped_column(String(50), default="queued")
+    trigger: Mapped[str] = mapped_column(String(50), default="auto")
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
@@ -96,6 +98,9 @@ class Comment(Base):
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
     document_version_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("document_versions.id", ondelete="CASCADE"), index=True
+    )
+    review_job_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("review_jobs.id", ondelete="SET NULL"), index=True, default=None
     )
     persona_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("personas.id", ondelete="CASCADE"), index=True

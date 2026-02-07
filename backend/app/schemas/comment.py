@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class CommentBase(BaseModel):
     persona_id: int
     document_version_id: int
+    review_job_id: int | None = None
     text: str = Field(min_length=1)
     start_offset: int = Field(ge=0)
     end_offset: int = Field(ge=0)

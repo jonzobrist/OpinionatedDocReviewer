@@ -41,17 +41,16 @@ class Settings(BaseSettings):
     OPENAI_MAX_INPUT_CHARS: int = 12000
     OPENAI_TEMPERATURE: float = 0.2
     OPENAI_TIMEOUT_SECONDS: int = 30
-    REVIEW_INLINE: bool = True
+    REVIEW_INLINE: bool = False
     DOC_REPO_ROOT: str = ".run/doc-repos"
     DOC_REPO_ENABLED: bool = True
-    CORS_ALLOW_ORIGINS: list[str] = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ]
+    CORS_ALLOW_ORIGINS: str = (
+        "http://localhost:3000,http://127.0.0.1:3000,https://opinion.zlyxy.me"
+    )
     CORS_ALLOW_ORIGIN_REGEX: str | None = None
     CORS_ALLOW_CREDENTIALS: bool = False
-    CORS_ALLOW_METHODS: list[str] = ["*"]
-    CORS_ALLOW_HEADERS: list[str] = ["*"]
+    CORS_ALLOW_METHODS: str = "*"
+    CORS_ALLOW_HEADERS: str = "*"
     CORS_MAX_AGE: int = 600
 
     model_config = SettingsConfigDict(
@@ -79,23 +78,24 @@ class Settings(BaseSettings):
             file_secret_settings,
         )
 
-    @classmethod
-    def model_validate(cls, obj, **kwargs):
-        if isinstance(obj, dict):
-            obj = dict(obj)
-            obj["CORS_ALLOW_ORIGINS"] = parse_csv(
-                obj.get("CORS_ALLOW_ORIGINS"),
-                obj.get("CORS_ALLOW_ORIGINS", cls().CORS_ALLOW_ORIGINS),
-            )
-            obj["CORS_ALLOW_METHODS"] = parse_csv(
-                obj.get("CORS_ALLOW_METHODS"),
-                obj.get("CORS_ALLOW_METHODS", cls().CORS_ALLOW_METHODS),
-            )
-            obj["CORS_ALLOW_HEADERS"] = parse_csv(
-                obj.get("CORS_ALLOW_HEADERS"),
-                obj.get("CORS_ALLOW_HEADERS", cls().CORS_ALLOW_HEADERS),
-            )
-        return super().model_validate(obj, **kwargs)
+    @property
+    def cors_allow_origins_list(self) -> list[str]:
+        return parse_csv(
+            self.CORS_ALLOW_ORIGINS,
+            [
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+                "https://opinion.zlyxy.me",
+            ],
+        )
+
+    @property
+    def cors_allow_methods_list(self) -> list[str]:
+        return parse_csv(self.CORS_ALLOW_METHODS, ["*"])
+
+    @property
+    def cors_allow_headers_list(self) -> list[str]:
+        return parse_csv(self.CORS_ALLOW_HEADERS, ["*"])
 
 
 settings = Settings()

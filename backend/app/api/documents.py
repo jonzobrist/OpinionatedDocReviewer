@@ -7,10 +7,11 @@ from app.crud.document import (
     delete_document,
     get_document,
     list_documents,
+    list_document_library,
     update_document,
 )
 from app.crud.document_version import create_version, get_version, list_versions
-from app.schemas.document import DocumentCreate, DocumentRead, DocumentUpdate
+from app.schemas.document import DocumentCreate, DocumentRead, DocumentUpdate, DocumentLibraryEntry
 from app.schemas.document_version import DocumentVersionCreate, DocumentVersionRead
 from app.reviews.git_repo import ensure_repo
 from app.reviews.git_history import list_commits
@@ -26,6 +27,14 @@ def list_all(
     return list_documents(db, tenant_id)
 
 
+@router.get("/library", response_model=list[DocumentLibraryEntry])
+def list_library(
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+) -> list[DocumentLibraryEntry]:
+    return list_document_library(db, tenant_id)
+
+
 @router.post("", response_model=DocumentRead, status_code=201)
 def create(
     payload: DocumentCreate,
@@ -35,7 +44,7 @@ def create(
     return create_document(db, tenant_id, payload)
 
 
-@router.get("/{document_id}", response_model=DocumentRead)
+@router.get("/{document_id:int}", response_model=DocumentRead)
 def get_one(
     document_id: int,
     db: Session = Depends(get_db),
@@ -47,7 +56,7 @@ def get_one(
     return doc
 
 
-@router.patch("/{document_id}", response_model=DocumentRead)
+@router.patch("/{document_id:int}", response_model=DocumentRead)
 def update(
     document_id: int,
     payload: DocumentUpdate,
@@ -60,7 +69,7 @@ def update(
     return doc
 
 
-@router.delete("/{document_id}", status_code=204)
+@router.delete("/{document_id:int}", status_code=204)
 def delete(
     document_id: int,
     db: Session = Depends(get_db),
@@ -71,7 +80,7 @@ def delete(
         raise HTTPException(status_code=404, detail="Document not found")
 
 
-@router.get("/{document_id}/versions", response_model=list[DocumentVersionRead])
+@router.get("/{document_id:int}/versions", response_model=list[DocumentVersionRead])
 def list_doc_versions(
     document_id: int,
     db: Session = Depends(get_db),
@@ -84,7 +93,7 @@ def list_doc_versions(
 
 
 @router.post(
-    "/{document_id}/versions",
+    "/{document_id:int}/versions",
     response_model=DocumentVersionRead,
     status_code=201,
 )
@@ -112,7 +121,7 @@ def get_version_by_id(
     return version
 
 
-@router.get("/{document_id}/history")
+@router.get("/{document_id:int}/history")
 def get_history(
     document_id: int,
     db: Session = Depends(get_db),

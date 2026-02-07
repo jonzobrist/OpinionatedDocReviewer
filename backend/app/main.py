@@ -16,11 +16,11 @@ def create_app(init_db_on_startup: bool = True) -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.CORS_ALLOW_ORIGINS,
+        allow_origins=settings.cors_allow_origins_list,
         allow_origin_regex=settings.CORS_ALLOW_ORIGIN_REGEX,
         allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
-        allow_methods=settings.CORS_ALLOW_METHODS,
-        allow_headers=settings.CORS_ALLOW_HEADERS,
+        allow_methods=settings.cors_allow_methods_list,
+        allow_headers=settings.cors_allow_headers_list,
         max_age=settings.CORS_MAX_AGE,
     )
 

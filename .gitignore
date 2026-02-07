@@ -18,7 +18,11 @@ backend/config.toml
 # Runtime artifacts
 .run/
 logs/
+frontend/.next/
+frontend/node_modules/
+backend/.venv/
 
 # macOS
 .DS_Store
 .env
+backend/.env

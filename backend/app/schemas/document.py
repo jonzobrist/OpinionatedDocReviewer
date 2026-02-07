@@ -21,3 +21,20 @@ class DocumentRead(DocumentBase):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentLibraryEntry(BaseModel):
+    id: int
+    tenant_id: str
+    title: str
+    created_at: datetime
+    latest_version_id: int | None
+    latest_version_label: str | None
+    latest_version_created_at: datetime | None
+    latest_review_job_id: int | None
+    latest_review_status: str | None
+    latest_review_created_at: datetime | None
+    latest_review_completed_at: datetime | None
+    needs_review: bool
+
+    model_config = ConfigDict(from_attributes=True)
