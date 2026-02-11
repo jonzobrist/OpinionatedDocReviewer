@@ -219,7 +219,14 @@ def build_prompt(
     tone: str | None,
     content: str,
 ) -> str:
-    focus = ", ".join(focus_areas or []) if focus_areas else "general quality"
+    clean_focus_areas = []
+    for item in focus_areas or []:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if text:
+            clean_focus_areas.append(text)
+    focus = ", ".join(clean_focus_areas) if clean_focus_areas else "general quality"
     voice = tone or "direct and constructive"
     summary = description or ""
     return (
