@@ -41,6 +41,7 @@ export type DocumentCommitRead = {
 
 export type SystemStatus = {
   redis: { ok: boolean; error: string | null };
+  llm?: { provider: string; ok: boolean; error: string | null; model?: string | null };
   openai: { ok: boolean };
   review_queue: string;
   doc_repo_enabled: boolean;

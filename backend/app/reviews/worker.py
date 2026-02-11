@@ -6,13 +6,13 @@ from app.core.config import settings
 from app.db import models
 from app.db.init_db import seed_default_personas
 from app.db.session import SessionLocal
-from app.reviews.openai_client import get_openai_client
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout, as_completed
 from app.reviews.parsing import parse_bullets, persist_comment_payloads
 from app.reviews.git_repo import ensure_repo
 from app.reviews.review_storage import write_review_and_commit
 from datetime import datetime, timezone
+from app.reviews.llm_provider import generate_completion, get_model_label, get_provider_name
 
 
 def run_review_job(review_job_id: int, tenant_id: str) -> None:
@@ -138,7 +138,8 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
                     "status": job.status,
                     "trigger": job.trigger,
                     "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-                    "model": settings.OPENAI_MODEL,
+                    "provider": get_provider_name(),
+                    "model": get_model_label(),
                     "results": results,
                 }
                 write_review_and_commit(repo, version.id, review_job_id, payload)
@@ -179,7 +180,6 @@ def generate_comments(persona: models.Persona, content: str) -> list[str]:
 
 
 def generate_comments_for_spec(persona: dict, content: str) -> list[str]:
-    client = get_openai_client()
     prompt = build_prompt(
         persona["name"],
         persona.get("description"),
@@ -194,26 +194,20 @@ def generate_comments_for_spec(persona: dict, content: str) -> list[str]:
         flush=True,
     )
 
-    def _call():
-        return client.responses.create(
-            model=settings.OPENAI_MODEL,
-            input=prompt,
-            max_output_tokens=settings.OPENAI_MAX_TOKENS,
-            temperature=settings.OPENAI_TEMPERATURE,
-        )
-
     executor = ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(_call)
+    future = executor.submit(generate_completion, prompt)
     try:
-        response = future.result(timeout=settings.OPENAI_TIMEOUT_SECONDS)
+        text = future.result(timeout=settings.OPENAI_TIMEOUT_SECONDS)
     except FutureTimeout:
         future.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
-        raise TimeoutError("OpenAI request timed out")
+        raise TimeoutError(f"{get_provider_name()} request timed out")
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
-    print(f"[review] OpenAI call took {time.time() - start:.2f}s", flush=True)
-    text = response.output_text
+    print(
+        f"[review] {get_provider_name()} call took {time.time() - start:.2f}s",
+        flush=True,
+    )
     return parse_bullets(text)
 
 

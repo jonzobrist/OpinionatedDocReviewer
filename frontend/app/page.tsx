@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  default as React,
   useEffect,
   useMemo,
   useRef,
@@ -752,13 +753,17 @@ export default function HomePage() {
         </div>
       )}
 
-      {systemStatus && (!systemStatus.redis.ok || !systemStatus.openai.ok) && (
+      {systemStatus &&
+        (!systemStatus.redis.ok || !(systemStatus.llm?.ok ?? systemStatus.openai.ok)) && (
         <div className="status warn">
           {!systemStatus.redis.ok && (
             <div>Redis is offline. Start Redis to enable reviews.</div>
           )}
-          {!systemStatus.openai.ok && (
-            <div>OpenAI key missing. Set OPENAI_API_KEY in config or env.</div>
+          {!(systemStatus.llm?.ok ?? systemStatus.openai.ok) && (
+            <div>
+              LLM provider issue ({systemStatus.llm?.provider ?? 'openai'}):{' '}
+              {systemStatus.llm?.error ?? 'Check provider credentials/configuration.'}
+            </div>
           )}
         </div>
       )}
