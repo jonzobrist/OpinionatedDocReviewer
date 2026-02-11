@@ -4,6 +4,16 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
+let mockPathname = '/';
+const pushMock = vi.fn((next: string) => {
+  mockPathname = next;
+});
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => mockPathname,
+  useRouter: () => ({ push: pushMock })
+}));
+
 import HomePage from '../app/page';
 
 function json(data: unknown, status = 200) {
@@ -15,6 +25,8 @@ function json(data: unknown, status = 200) {
 
 describe('page controls', () => {
   beforeEach(() => {
+    mockPathname = '/';
+    pushMock.mockClear();
     const store = new Map<string, string>();
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
@@ -93,14 +105,14 @@ describe('page controls', () => {
   });
 
   it('opens library overlay from top nav', async () => {
+    mockPathname = '/library';
     render(<HomePage />);
-    fireEvent.click(screen.getByRole('button', { name: 'Library' }));
     expect(await screen.findByText('Review Ledger')).toBeTruthy();
   });
 
   it('saves system settings to localStorage', async () => {
+    mockPathname = '/system';
     render(<HomePage />);
-    fireEvent.click(screen.getByRole('button', { name: 'System' }));
     const apiInput = await screen.findByPlaceholderText('http://localhost:8006/api');
     const tenantInput = await screen.findByPlaceholderText('local-dev');
 

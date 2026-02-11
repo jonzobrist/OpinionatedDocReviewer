@@ -72,6 +72,16 @@ main {
   gap: 14px;
 }
 
+.brand-link {
+  border-radius: 12px;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.brand-link:hover {
+  transform: translateY(-1px);
+  opacity: 0.92;
+}
+
 .logo {
   width: 44px;
   height: 44px;

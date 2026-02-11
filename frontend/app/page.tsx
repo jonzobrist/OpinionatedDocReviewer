@@ -12,6 +12,8 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import JSZip from 'jszip';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   apiFetch,
   DEFAULT_TENANT,
@@ -115,10 +117,6 @@ export default function HomePage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [showAgents, setShowAgents] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
-  const [showLibrary, setShowLibrary] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [enabledPersonas, setEnabledPersonas] = useState<Set<number>>(new Set());
   const [recentCommentIds, setRecentCommentIds] = useState<Set<number>>(new Set());
   const [agentThemes, setAgentThemes] = useState<Record<string, AgentTheme>>({});
@@ -144,6 +142,13 @@ export default function HomePage() {
   const markRefs = useRef<Record<number, HTMLElement | null>>({});
   const cardRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const hoveredCommentIdRef = useRef<number | null>(null);
+  const pathname = usePathname();
+  const router = useRouter();
+  const normalizedPath = (pathname || '/').toLowerCase();
+  const showLibrary = normalizedPath === '/library';
+  const showAgents = normalizedPath === '/agents';
+  const showHistory = normalizedPath === '/history';
+  const showSettings = normalizedPath === '/system';
 
   const selectedDocument = useMemo(() => {
     const fromLibrary = libraryEntries.find((doc) => doc.id === selectedDocumentId);
@@ -604,7 +609,7 @@ export default function HomePage() {
     setErrorMessage(null);
     setSelectedDocumentId(documentId);
     await loadVersions(documentId);
-    setShowLibrary(false);
+    router.push('/');
     setStatusMessage('Loaded saved review for selected document.');
   }
 
@@ -1019,6 +1024,14 @@ export default function HomePage() {
     }
   }
 
+  function navigatePanel(path: '/library' | '/agents' | '/history' | '/system') {
+    if (normalizedPath === path) {
+      router.push('/');
+      return;
+    }
+    router.push(path);
+  }
+
   function downloadFile(filename: string, content: string, mime = 'text/plain;charset=utf-8') {
     const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
@@ -1177,24 +1190,24 @@ export default function HomePage() {
   return (
     <main>
       <div className="topbar">
-        <div className="brand">
+        <Link className="brand brand-link" href="/">
           <div className="logo">ODR</div>
           <div>
             <div className="brand-title">Opinionated Doc Reviewer</div>
             <div className="brand-sub">Live multi‑persona review console</div>
           </div>
-        </div>
+        </Link>
         <div className="top-actions">
-          <button className="ghost-button" type="button" onClick={() => setShowLibrary((prev) => !prev)}>
+          <button className="ghost-button" type="button" onClick={() => navigatePanel('/library')}>
             Library
           </button>
-          <button className="ghost-button" type="button" onClick={() => setShowAgents((prev) => !prev)}>
+          <button className="ghost-button" type="button" onClick={() => navigatePanel('/agents')}>
             Agents
           </button>
-          <button className="ghost-button" type="button" onClick={() => setShowHistory((prev) => !prev)}>
+          <button className="ghost-button" type="button" onClick={() => navigatePanel('/history')}>
             History
           </button>
-          <button className="ghost-button" type="button" onClick={() => setShowSettings((prev) => !prev)}>
+          <button className="ghost-button" type="button" onClick={() => navigatePanel('/system')}>
             System
           </button>
         </div>
@@ -1760,7 +1773,7 @@ export default function HomePage() {
                             onClick={() => {
                               if (!entry.latest_version_id) return;
                               setSelectedDocumentId(entry.id);
-                              setShowLibrary(false);
+                              router.push('/');
                               void loadVersions(entry.id).then(() =>
                                 handleRunReview(entry.latest_version_id as number, {
                                   requireConfirm: false
@@ -1777,7 +1790,7 @@ export default function HomePage() {
                             onClick={() => {
                               if (!entry.latest_version_id) return;
                               setSelectedDocumentId(entry.id);
-                              setShowLibrary(false);
+                              router.push('/');
                               void loadVersions(entry.id).then(() =>
                                 handleRunReview(entry.latest_version_id as number, {
                                   requireConfirm: true
