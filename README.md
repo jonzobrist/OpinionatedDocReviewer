@@ -70,8 +70,82 @@ npm test -- --run
 Do not commit secrets.
 
 - Root `.env` and `backend/.env` are gitignored.
-- Set `OPENAI_API_KEY` in local env file(s).
+- Configure provider settings via the UI: `System` panel in `http://localhost:3000`.
+- Or configure via `backend/.env` / `backend/config.toml` (examples in `backend/.env.example` and `backend/config.example.toml`).
 - CORS is configurable in backend env/config; see `PRODUCT.md`.
+
+## LLM Provider Setup
+
+The app supports two review providers:
+
+- `openai`
+- `bedrock` (AWS Bedrock)
+
+Set provider:
+
+```bash
+LLM_PROVIDER=openai
+# or
+LLM_PROVIDER=bedrock
+```
+
+After changes, restart:
+
+```bash
+./scripts/admin/restart.sh
+```
+
+### OpenAI Configuration
+
+Required:
+
+```bash
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+```
+
+Optional tuning:
+
+```bash
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_MAX_TOKENS=700
+OPENAI_TEMPERATURE=0.2
+OPENAI_TIMEOUT_SECONDS=30
+```
+
+Official docs:
+
+- OpenAI API keys: [OpenAI API Keys](https://platform.openai.com/api-keys)
+- OpenAI Responses API: [Responses API](https://platform.openai.com/docs/api-reference/responses)
+- Model reference: [OpenAI Models](https://platform.openai.com/docs/models)
+
+### AWS Bedrock Configuration
+
+Required:
+
+```bash
+LLM_PROVIDER=bedrock
+BEDROCK_MODEL_ID=anthropic.claude-3-5-haiku-20241022-v1:0
+BEDROCK_REGION=us-east-1
+```
+
+Credentials (choose one):
+
+- Standard AWS credential chain (recommended): IAM role, `~/.aws/credentials`, SSO, etc.
+- Explicit env values:
+
+```bash
+BEDROCK_AWS_ACCESS_KEY_ID=...
+BEDROCK_AWS_SECRET_ACCESS_KEY=...
+BEDROCK_AWS_SESSION_TOKEN=... # optional
+```
+
+Official docs:
+
+- Bedrock user guide: [Amazon Bedrock Documentation](https://docs.aws.amazon.com/bedrock/)
+- Bedrock model IDs/availability: [Supported foundation models in Amazon Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/foundation-models-reference.html)
+- Bedrock Converse API: [Converse API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html)
+- AWS credentials: [Boto3 Credentials](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html)
 
 ## GitHub Push Notes
 
@@ -89,4 +163,3 @@ If `origin` already exists, update it:
 git remote set-url origin git@github.com:<your-user>/<your-repo>.git
 git push -u origin main
 ```
-

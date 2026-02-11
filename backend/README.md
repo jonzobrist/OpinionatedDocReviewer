@@ -24,6 +24,66 @@ python -m app.worker
 - Review jobs are enqueued to Redis and processed by the worker.
 - Document versions are committed to a per-document git repository under `.run/doc-repos` (configurable via `DOC_REPO_ROOT`).
 
+## Provider Configuration Details
+
+You can configure provider values in either:
+
+- `backend/.env`
+- `backend/config.toml`
+- UI `System` panel (`http://localhost:3000`) for runtime config updates
+
+### OpenAI
+
+Required:
+
+```bash
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+```
+
+Optional:
+
+```bash
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_MAX_TOKENS=700
+OPENAI_TEMPERATURE=0.2
+OPENAI_TIMEOUT_SECONDS=30
+```
+
+References:
+
+- [OpenAI API keys](https://platform.openai.com/api-keys)
+- [OpenAI Responses API](https://platform.openai.com/docs/api-reference/responses)
+- [OpenAI models](https://platform.openai.com/docs/models)
+
+### AWS Bedrock
+
+Required:
+
+```bash
+LLM_PROVIDER=bedrock
+BEDROCK_MODEL_ID=anthropic.claude-3-5-haiku-20241022-v1:0
+BEDROCK_REGION=us-east-1
+```
+
+Credentials:
+
+- Preferred: standard AWS credential resolution (IAM role, profile, SSO, etc.)
+- Optional explicit settings:
+
+```bash
+BEDROCK_AWS_ACCESS_KEY_ID=...
+BEDROCK_AWS_SECRET_ACCESS_KEY=...
+BEDROCK_AWS_SESSION_TOKEN=... # optional
+```
+
+References:
+
+- [Amazon Bedrock docs](https://docs.aws.amazon.com/bedrock/)
+- [Supported Bedrock model IDs](https://docs.aws.amazon.com/bedrock/latest/userguide/foundation-models-reference.html)
+- [Bedrock Converse API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html)
+- [Boto3 credential configuration](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html)
+
 ## Tests
 ```bash
 pytest
