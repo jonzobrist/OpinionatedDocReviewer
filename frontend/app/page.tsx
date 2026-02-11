@@ -776,7 +776,6 @@ export default function HomePage() {
 
     const frame = requestAnimationFrame(() => {
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      const textNodes: Array<{ node: Text; start: number; end: number }> = [];
       let full = '';
       let current = walker.nextNode();
       while (current) {
@@ -785,9 +784,7 @@ export default function HomePage() {
         const skip = Boolean(parent?.closest('code, pre, svg'));
         const text = textNode.textContent ?? '';
         if (!skip && text.trim().length > 0) {
-          const start = full.length;
           full += text;
-          textNodes.push({ node: textNode, start, end: full.length });
         } else {
           full += text;
         }
@@ -795,6 +792,7 @@ export default function HomePage() {
       }
 
       const fullLower = full.toLowerCase();
+      const matches: Array<{ comment: CommentRead; start: number; end: number; color: string }> = [];
       let searchFrom = 0;
       for (const comment of anchoredComments) {
         const excerptCandidate =
@@ -812,35 +810,69 @@ export default function HomePage() {
         if (idx < 0) continue;
 
         const end = idx + excerptLower.length;
-        const startNode = textNodes.find((entry) => idx >= entry.start && idx < entry.end);
-        const endNode = textNodes.find((entry) => end > entry.start && end <= entry.end);
-        if (!startNode || !endNode) continue;
-
-        const range = document.createRange();
-        range.setStart(startNode.node, idx - startNode.start);
-        range.setEnd(endNode.node, end - endNode.start);
-
         const persona = personaMap.get(comment.persona_id);
         const color = persona
           ? getThemeForPersona(agentThemes, persona.id, colorForPersona(persona.id))
           : AGENT_COLORS[0];
+        matches.push({ comment, start: idx, end, color });
+        searchFrom = end;
+      }
+
+      const locateBoundary = (targetIndex: number) => {
+        const nodeWalker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let seen = 0;
+        let node = nodeWalker.nextNode();
+        while (node) {
+          const textNode = node as Text;
+          const parent = textNode.parentElement;
+          const skip = Boolean(parent?.closest('code, pre, svg'));
+          const text = textNode.textContent ?? '';
+          const length = text.length;
+          if (!skip && length > 0) {
+            const nextSeen = seen + length;
+            if (targetIndex >= seen && targetIndex <= nextSeen) {
+              return { node: textNode, offset: Math.max(0, targetIndex - seen) };
+            }
+            seen = nextSeen;
+          } else {
+            seen += length;
+          }
+          node = nodeWalker.nextNode();
+        }
+        return null;
+      };
+
+      for (let idx = matches.length - 1; idx >= 0; idx -= 1) {
+        const match = matches[idx];
+        const startBoundary = locateBoundary(match.start);
+        const endBoundary = locateBoundary(match.end);
+        if (!startBoundary || !endBoundary) {
+          markRefs.current[match.comment.id] = null;
+          continue;
+        }
+
+        const range = document.createRange();
+        range.setStart(startBoundary.node, startBoundary.offset);
+        range.setEnd(endBoundary.node, endBoundary.offset);
+
         const span = document.createElement('span');
         span.dataset.odrViewHighlight = '1';
         span.className = `doc-highlight view-highlight ${
-          activeCommentId === comment.id ? 'selected' : ''
+          activeCommentId === match.comment.id ? 'selected' : ''
         }`;
-        span.style.backgroundColor = `${color}22`;
-        span.style.borderBottomColor = color;
-        span.addEventListener('click', () => focusComment(comment.id));
-        span.addEventListener('mouseenter', () => setHoveredCommentId(comment.id));
+        span.style.backgroundColor = `${match.color}22`;
+        span.style.borderBottomColor = match.color;
+        span.addEventListener('click', () => focusComment(match.comment.id));
+        span.addEventListener('mouseenter', () => setHoveredCommentId(match.comment.id));
         span.addEventListener('mouseleave', () => setHoveredCommentId(null));
 
         try {
-          range.surroundContents(span);
-          markRefs.current[comment.id] = span;
-          searchFrom = end;
+          const fragment = range.extractContents();
+          span.appendChild(fragment);
+          range.insertNode(span);
+          markRefs.current[match.comment.id] = span;
         } catch {
-          markRefs.current[comment.id] = null;
+          markRefs.current[match.comment.id] = null;
         }
       }
       setHighlightTick((prev) => prev + 1);
