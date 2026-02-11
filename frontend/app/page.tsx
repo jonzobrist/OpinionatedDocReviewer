@@ -2,6 +2,7 @@
 
 import {
   default as React,
+  Suspense,
   useEffect,
   useMemo,
   useRef,
@@ -93,7 +94,7 @@ function MermaidDiagram({ chart }: { chart: string }) {
   return <div className="mermaid-diagram" ref={containerRef} />;
 }
 
-export default function HomePage() {
+function HomePageContent() {
   const [apiBase, setApiBaseState] = useState('');
   const [tenantId, setTenantIdState] = useState('');
 
@@ -135,6 +136,8 @@ export default function HomePage() {
   const [connectorPaths, setConnectorPaths] = useState<ConnectorPath[]>([]);
   const [highlightTick, setHighlightTick] = useState(0);
   const lastPollRef = useRef<number>(Date.now());
+  const commentsRef = useRef<CommentRead[]>([]);
+  const commentSignatureRef = useRef('');
   const workspaceRef = useRef<HTMLElement | null>(null);
   const docPanelRef = useRef<HTMLDivElement | null>(null);
   const docBodyRef = useRef<HTMLElement | null>(null);
@@ -166,6 +169,11 @@ export default function HomePage() {
     () => reviewJobs.find((job) => job.id === selectedReviewJobId) ?? null,
     [reviewJobs, selectedReviewJobId]
   );
+
+  useEffect(() => {
+    commentsRef.current = comments;
+    commentSignatureRef.current = buildCommentSignature(comments);
+  }, [comments]);
 
   useEffect(() => {
     setApiBaseState(getApiBase());
@@ -366,20 +374,26 @@ export default function HomePage() {
     try {
       const query = reviewJobId ? `&review_job_id=${reviewJobId}` : '';
       const data = await apiFetch<CommentRead[]>(`/comments?document_version_id=${versionId}${query}`);
+      const signature = buildCommentSignature(data);
       if (markRecent) {
         const now = Date.now();
         const fresh = new Set<number>();
-        for (const comment of data) {
-          const created = new Date(comment.created_at).getTime();
-          if (created > lastPollRef.current - 500) {
-            fresh.add(comment.id);
+        if (signature !== commentSignatureRef.current) {
+          for (const comment of data) {
+            const created = new Date(comment.created_at).getTime();
+            if (created > lastPollRef.current - 500) {
+              fresh.add(comment.id);
+            }
           }
         }
         lastPollRef.current = now;
         setRecentCommentIds(fresh);
       }
-      setComments(data);
-      return data;
+      if (signature !== commentSignatureRef.current) {
+        setComments(data);
+        return data;
+      }
+      return commentsRef.current;
     } catch (error) {
       setErrorMessage(normalizeError(error));
       return [];
@@ -978,7 +992,19 @@ export default function HomePage() {
           : AGENT_COLORS[0];
         nextPaths.push({ id: comment.id, path, color });
       }
-      setConnectorPaths(nextPaths);
+      setConnectorPaths((prev) => {
+        if (prev.length !== nextPaths.length) return nextPaths;
+        for (let idx = 0; idx < prev.length; idx += 1) {
+          if (
+            prev[idx].id !== nextPaths[idx].id ||
+            prev[idx].color !== nextPaths[idx].color ||
+            prev[idx].path !== nextPaths[idx].path
+          ) {
+            return nextPaths;
+          }
+        }
+        return prev;
+      });
     };
     const frame = requestAnimationFrame(recalc);
 
@@ -2019,6 +2045,14 @@ export default function HomePage() {
   );
 }
 
+export default function HomePage() {
+  return (
+    <Suspense fallback={null}>
+      <HomePageContent />
+    </Suspense>
+  );
+}
+
 function normalizeError(error: unknown) {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
@@ -2027,4 +2061,14 @@ function normalizeError(error: unknown) {
 
 function colorForPersona(id: number) {
   return AGENT_COLORS[id % AGENT_COLORS.length];
+}
+
+function buildCommentSignature(comments: CommentRead[]): string {
+  if (comments.length === 0) return '0';
+  return comments
+    .map(
+      (comment) =>
+        `${comment.id}|${comment.review_job_id}|${comment.start_offset}|${comment.end_offset}|${comment.created_at}|${comment.text}`
+    )
+    .join('||');
 }
