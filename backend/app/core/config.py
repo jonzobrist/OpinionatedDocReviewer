@@ -103,11 +103,13 @@ class Settings(BaseSettings):
         dotenv_settings,
         file_secret_settings,
     ):
+        # Precedence: runtime args > exported env vars > .env files > config.toml > file secrets.
+        # This keeps shell/env overrides reliable while still allowing persisted defaults in config.toml.
         return (
             init_settings,
-            load_config_file,
             env_settings,
             dotenv_settings,
+            load_config_file,
             file_secret_settings,
         )
 
