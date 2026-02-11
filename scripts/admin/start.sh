@@ -6,6 +6,10 @@ SERVICE="${1:-all}"
 source "$(dirname "$0")/_common.sh"
 ensure_dirs
 
+SYNC_DEPS="${SYNC_DEPS:-true}"
+backend_deps_synced=false
+frontend_deps_synced=false
+
 wait_for_port() {
   local port="$1"
   local pid_file="$2"
@@ -40,6 +44,52 @@ capture_listener_pid() {
   fi
 }
 
+sync_backend_deps() {
+  if [ "$backend_deps_synced" = true ]; then
+    return 0
+  fi
+  if [ "$SYNC_DEPS" != "true" ]; then
+    return 0
+  fi
+  if [ ! -f "$BACKEND_DIR/pyproject.toml" ]; then
+    return 0
+  fi
+  if command -v uv >/dev/null 2>&1; then
+    echo "Syncing backend dependencies (uv sync)"
+    (
+      cd "$BACKEND_DIR"
+      env UV_CACHE_DIR="$UV_CACHE_DIR" uv sync
+    )
+    backend_deps_synced=true
+    return 0
+  fi
+  echo "Skipping backend dependency sync: uv not found."
+  return 0
+}
+
+sync_frontend_deps() {
+  if [ "$frontend_deps_synced" = true ]; then
+    return 0
+  fi
+  if [ "$SYNC_DEPS" != "true" ]; then
+    return 0
+  fi
+  if [ ! -f "$FRONTEND_DIR/package.json" ]; then
+    return 0
+  fi
+  if command -v bun >/dev/null 2>&1; then
+    echo "Syncing frontend dependencies (bun install --frozen-lockfile)"
+    (
+      cd "$FRONTEND_DIR"
+      bun install --frozen-lockfile
+    )
+    frontend_deps_synced=true
+    return 0
+  fi
+  echo "Skipping frontend dependency sync: bun not found."
+  return 0
+}
+
 start_detached() {
   local workdir="$1"
   local pid_file="$2"
@@ -72,6 +122,8 @@ start_backend() {
     echo "Backend directory not found: $BACKEND_DIR"
     return 1
   fi
+
+  sync_backend_deps
 
   local venv_python="$BACKEND_DIR/.venv/bin/python"
   local venv_uvicorn="$BACKEND_DIR/.venv/bin/uvicorn"
@@ -115,6 +167,8 @@ start_frontend() {
     return 0
   fi
 
+  sync_frontend_deps
+
   echo "Starting frontend on port $FRONTEND_PORT"
   if ! command -v bun > /dev/null 2>&1; then
     echo "Bun is required to run the frontend. Please install bun first."
@@ -145,6 +199,8 @@ start_worker() {
     echo "Backend directory not found: $BACKEND_DIR"
     return 1
   fi
+
+  sync_backend_deps
 
   echo "Starting review worker"
   local venv_python="$BACKEND_DIR/.venv/bin/python"
