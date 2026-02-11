@@ -135,9 +135,11 @@ export default function HomePage() {
   } | null>(null);
   const [isReviewStarting, setIsReviewStarting] = useState(false);
   const [connectorPaths, setConnectorPaths] = useState<ConnectorPath[]>([]);
+  const [highlightTick, setHighlightTick] = useState(0);
   const lastPollRef = useRef<number>(Date.now());
   const workspaceRef = useRef<HTMLElement | null>(null);
   const docPanelRef = useRef<HTMLDivElement | null>(null);
+  const docBodyRef = useRef<HTMLElement | null>(null);
   const feedListRef = useRef<HTMLDivElement | null>(null);
   const markRefs = useRef<Record<number, HTMLElement | null>>({});
   const cardRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -746,6 +748,117 @@ export default function HomePage() {
     hoveredCommentIdRef.current = hoveredCommentId;
   }, [hoveredCommentId]);
 
+  useEffect(() => {
+    const root = docBodyRef.current;
+    if (!root) return;
+
+    const clearViewHighlights = () => {
+      const existing = root.querySelectorAll('span[data-odr-view-highlight="1"]');
+      existing.forEach((node) => {
+        const parent = node.parentNode;
+        if (!parent) return;
+        while (node.firstChild) {
+          parent.insertBefore(node.firstChild, node);
+        }
+        parent.removeChild(node);
+        parent.normalize();
+      });
+      for (const comment of anchoredComments) {
+        markRefs.current[comment.id] = null;
+      }
+    };
+
+    clearViewHighlights();
+    if (docMode !== 'view' || anchoredComments.length === 0) {
+      setHighlightTick((prev) => prev + 1);
+      return;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const textNodes: Array<{ node: Text; start: number; end: number }> = [];
+      let full = '';
+      let current = walker.nextNode();
+      while (current) {
+        const textNode = current as Text;
+        const parent = textNode.parentElement;
+        const skip = Boolean(parent?.closest('code, pre, svg'));
+        const text = textNode.textContent ?? '';
+        if (!skip && text.trim().length > 0) {
+          const start = full.length;
+          full += text;
+          textNodes.push({ node: textNode, start, end: full.length });
+        } else {
+          full += text;
+        }
+        current = walker.nextNode();
+      }
+
+      const fullLower = full.toLowerCase();
+      let searchFrom = 0;
+      for (const comment of anchoredComments) {
+        const excerptCandidate =
+          comment.excerpt?.trim() ||
+          selectedVersion?.content.slice(comment.start_offset, comment.end_offset).trim() ||
+          '';
+        if (!excerptCandidate) continue;
+        const excerptLower = excerptCandidate.toLowerCase();
+        if (!excerptLower) continue;
+
+        let idx = fullLower.indexOf(excerptLower, searchFrom);
+        if (idx < 0) {
+          idx = fullLower.indexOf(excerptLower);
+        }
+        if (idx < 0) continue;
+
+        const end = idx + excerptLower.length;
+        const startNode = textNodes.find((entry) => idx >= entry.start && idx < entry.end);
+        const endNode = textNodes.find((entry) => end > entry.start && end <= entry.end);
+        if (!startNode || !endNode) continue;
+
+        const range = document.createRange();
+        range.setStart(startNode.node, idx - startNode.start);
+        range.setEnd(endNode.node, end - endNode.start);
+
+        const persona = personaMap.get(comment.persona_id);
+        const color = persona
+          ? getThemeForPersona(agentThemes, persona.id, colorForPersona(persona.id))
+          : AGENT_COLORS[0];
+        const span = document.createElement('span');
+        span.dataset.odrViewHighlight = '1';
+        span.className = `doc-highlight view-highlight ${
+          activeCommentId === comment.id ? 'selected' : ''
+        }`;
+        span.style.backgroundColor = `${color}22`;
+        span.style.borderBottomColor = color;
+        span.addEventListener('click', () => focusComment(comment.id));
+        span.addEventListener('mouseenter', () => setHoveredCommentId(comment.id));
+        span.addEventListener('mouseleave', () => setHoveredCommentId(null));
+
+        try {
+          range.surroundContents(span);
+          markRefs.current[comment.id] = span;
+          searchFrom = end;
+        } catch {
+          markRefs.current[comment.id] = null;
+        }
+      }
+      setHighlightTick((prev) => prev + 1);
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+      clearViewHighlights();
+    };
+  }, [
+    docMode,
+    anchoredComments,
+    selectedVersion,
+    personaMap,
+    agentThemes,
+    activeCommentId
+  ]);
+
   const allFilteredSelected = useMemo(() => {
     if (filteredLibraryWithSearch.length === 0) return false;
     return filteredLibraryWithSearch.every((entry) => selectedLibraryIds.has(entry.id));
@@ -791,10 +904,6 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!selectedVersion) {
-      setConnectorPaths([]);
-      return;
-    }
-    if (docMode !== 'source') {
       setConnectorPaths([]);
       return;
     }
@@ -844,7 +953,7 @@ export default function HomePage() {
       feed?.removeEventListener('scroll', onResize);
       doc?.removeEventListener('scroll', onResize);
     };
-  }, [anchoredComments, selectedVersion, personaMap, agentThemes, docMode, activeCommentId]);
+  }, [anchoredComments, selectedVersion, personaMap, agentThemes, docMode, activeCommentId, highlightTick]);
 
   function updateAgentTheme(id: number, color: string, label?: string) {
     setAgentThemes((prev) => {
@@ -1206,7 +1315,7 @@ export default function HomePage() {
                 </button>
               </div>
             </div>
-            <article className="doc-body">
+            <article className="doc-body" ref={docBodyRef}>
               {docMode === 'view' && (
                 <div className="markdown-view">
                   <ReactMarkdown
