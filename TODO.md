@@ -39,3 +39,5 @@
 - [x] Parallel persona review execution for faster live updates
 - [x] Explicit-only re-review flow (normal open/view does not re-run)
 - [x] Persist and reload review results by version
+- [x] Library actions: archive, restore, delete, review, re-review
+- [x] Library bulk actions: archive, restore, delete, re-review

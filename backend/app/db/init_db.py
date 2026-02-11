@@ -92,8 +92,23 @@ def _ensure_schema() -> None:
             "review_job_id",
             "INTEGER",
         )
+        _ensure_column(
+            connection,
+            "documents",
+            "is_archived",
+            "BOOLEAN DEFAULT 0",
+        )
+        _ensure_column(
+            connection,
+            "documents",
+            "archived_at",
+            "DATETIME",
+        )
         connection.execute(
             text("UPDATE review_jobs SET trigger='auto' WHERE trigger IS NULL")
+        )
+        connection.execute(
+            text("UPDATE documents SET is_archived=0 WHERE is_archived IS NULL")
         )
         connection.commit()
 

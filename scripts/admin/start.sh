@@ -6,6 +6,20 @@ SERVICE="${1:-all}"
 source "$(dirname "$0")/_common.sh"
 ensure_dirs
 
+start_detached() {
+  local workdir="$1"
+  local pid_file="$2"
+  local log_file="$3"
+  shift 3
+
+  (
+    cd "$workdir"
+    nohup "$@" > "$log_file" 2>&1 &
+    local pid=$!
+    echo "$pid" > "$pid_file"
+  )
+}
+
 start_backend() {
   if [ -f "$backend_pid_file" ]; then
     pid=$(cat "$backend_pid_file")
@@ -29,11 +43,20 @@ start_backend() {
   local venv_uvicorn="$BACKEND_DIR/.venv/bin/uvicorn"
   echo "Starting backend on port $PORT"
   if [ -x "$venv_python" ]; then
-    (cd "$BACKEND_DIR" && nohup "$venv_python" -m uvicorn app.main:app --host 0.0.0.0 --port "$PORT" > "$LOG_DIR/backend.log" 2>&1 & echo $! > "$backend_pid_file")
+    start_detached "$BACKEND_DIR" "$backend_pid_file" "$LOG_DIR/backend.log" \
+      "$venv_python" -m uvicorn app.main:app --host 0.0.0.0 --port "$PORT"
   elif [ -x "$venv_uvicorn" ]; then
-    (cd "$BACKEND_DIR" && nohup "$venv_uvicorn" app.main:app --host 0.0.0.0 --port "$PORT" > "$LOG_DIR/backend.log" 2>&1 & echo $! > "$backend_pid_file")
+    start_detached "$BACKEND_DIR" "$backend_pid_file" "$LOG_DIR/backend.log" \
+      "$venv_uvicorn" app.main:app --host 0.0.0.0 --port "$PORT"
   else
-    (cd "$BACKEND_DIR" && UV_CACHE_DIR="$UV_CACHE_DIR" nohup uv run uvicorn app.main:app --host 0.0.0.0 --port "$PORT" > "$LOG_DIR/backend.log" 2>&1 & echo $! > "$backend_pid_file")
+    start_detached "$BACKEND_DIR" "$backend_pid_file" "$LOG_DIR/backend.log" \
+      env UV_CACHE_DIR="$UV_CACHE_DIR" uv run uvicorn app.main:app --host 0.0.0.0 --port "$PORT"
+  fi
+
+  sleep 1
+  if ! is_port_in_use "$PORT"; then
+    echo "Backend failed to start. Check $LOG_DIR/backend.log"
+    return 1
   fi
 }
 
@@ -62,7 +85,14 @@ start_frontend() {
     echo "Bun is required to run the frontend. Please install bun first."
     return 1
   fi
-  (cd "$FRONTEND_DIR" && PORT="$FRONTEND_PORT" UV_CACHE_DIR="$UV_CACHE_DIR" nohup bun run dev > "$LOG_DIR/frontend.log" 2>&1 & echo $! > "$frontend_pid_file")
+  start_detached "$FRONTEND_DIR" "$frontend_pid_file" "$LOG_DIR/frontend.log" \
+    env PORT="$FRONTEND_PORT" UV_CACHE_DIR="$UV_CACHE_DIR" bun run dev
+
+  sleep 1
+  if ! is_port_in_use "$FRONTEND_PORT"; then
+    echo "Frontend failed to start. Check $LOG_DIR/frontend.log"
+    return 1
+  fi
 }
 
 start_worker() {
@@ -83,11 +113,13 @@ start_worker() {
   echo "Starting review worker"
   local venv_python="$BACKEND_DIR/.venv/bin/python"
   if [ -x "$venv_python" ]; then
-    (cd "$BACKEND_DIR" && nohup "$venv_python" -m app.worker > "$LOG_DIR/worker.log" 2>&1 & echo $! > "$worker_pid_file")
+    start_detached "$BACKEND_DIR" "$worker_pid_file" "$LOG_DIR/worker.log" \
+      "$venv_python" -m app.worker
     return 0
   fi
   if command -v uv > /dev/null 2>&1; then
-    (cd "$BACKEND_DIR" && UV_CACHE_DIR="$UV_CACHE_DIR" nohup uv run python -m app.worker > "$LOG_DIR/worker.log" 2>&1 & echo $! > "$worker_pid_file")
+    start_detached "$BACKEND_DIR" "$worker_pid_file" "$LOG_DIR/worker.log" \
+      env UV_CACHE_DIR="$UV_CACHE_DIR" uv run python -m app.worker
     return 0
   else
     echo "Worker not started: uv not found and venv missing."

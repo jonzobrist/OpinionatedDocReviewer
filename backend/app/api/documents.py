@@ -8,10 +8,17 @@ from app.crud.document import (
     get_document,
     list_documents,
     list_document_library,
+    set_document_archived,
     update_document,
 )
 from app.crud.document_version import create_version, get_version, list_versions
-from app.schemas.document import DocumentCreate, DocumentRead, DocumentUpdate, DocumentLibraryEntry
+from app.schemas.document import (
+    DocumentArchiveUpdate,
+    DocumentCreate,
+    DocumentLibraryEntry,
+    DocumentRead,
+    DocumentUpdate,
+)
 from app.schemas.document_version import DocumentVersionCreate, DocumentVersionRead
 from app.reviews.git_repo import ensure_repo
 from app.reviews.git_history import list_commits
@@ -21,18 +28,20 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 
 @router.get("", response_model=list[DocumentRead])
 def list_all(
+    include_archived: bool = False,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
 ) -> list[DocumentRead]:
-    return list_documents(db, tenant_id)
+    return list_documents(db, tenant_id, include_archived=include_archived)
 
 
 @router.get("/library", response_model=list[DocumentLibraryEntry])
 def list_library(
+    include_archived: bool = True,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
 ) -> list[DocumentLibraryEntry]:
-    return list_document_library(db, tenant_id)
+    return list_document_library(db, tenant_id, include_archived=include_archived)
 
 
 @router.post("", response_model=DocumentRead, status_code=201)
@@ -64,6 +73,31 @@ def update(
     tenant_id: str = Depends(get_tenant_id),
 ) -> DocumentRead:
     doc = update_document(db, tenant_id, document_id, payload)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+@router.post("/{document_id:int}/archive", response_model=DocumentRead)
+def archive(
+    document_id: int,
+    payload: DocumentArchiveUpdate,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+) -> DocumentRead:
+    doc = set_document_archived(db, tenant_id, document_id, payload.archived)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+@router.post("/{document_id:int}/restore", response_model=DocumentRead)
+def restore(
+    document_id: int,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+) -> DocumentRead:
+    doc = set_document_archived(db, tenant_id, document_id, archived=False)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return doc

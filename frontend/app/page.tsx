@@ -1,6 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent
+} from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   apiFetch,
   DEFAULT_TENANT,
@@ -49,6 +58,9 @@ export default function HomePage() {
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [selectedReviewJobId, setSelectedReviewJobId] = useState<number | null>(null);
+  const [docMode, setDocMode] = useState<'view' | 'source'>('view');
+  const [focusedCommentId, setFocusedCommentId] = useState<number | null>(null);
+  const [hoveredCommentId, setHoveredCommentId] = useState<number | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -60,8 +72,17 @@ export default function HomePage() {
   const [enabledPersonas, setEnabledPersonas] = useState<Set<number>>(new Set());
   const [recentCommentIds, setRecentCommentIds] = useState<Set<number>>(new Set());
   const [agentThemes, setAgentThemes] = useState<Record<string, AgentTheme>>({});
-  const [libraryFilter, setLibraryFilter] = useState<'all' | 'needs' | 'reviewed'>('all');
+  const [libraryFilter, setLibraryFilter] = useState<
+    'all' | 'needs' | 'reviewed' | 'archived'
+  >('all');
   const [librarySearch, setLibrarySearch] = useState('');
+  const [selectedLibraryIds, setSelectedLibraryIds] = useState<Set<number>>(new Set());
+  const [isLibraryHovering, setIsLibraryHovering] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{
+    label: string;
+    done: number;
+    total: number;
+  } | null>(null);
   const [connectorPaths, setConnectorPaths] = useState<ConnectorPath[]>([]);
   const lastPollRef = useRef<number>(Date.now());
   const workspaceRef = useRef<HTMLElement | null>(null);
@@ -69,6 +90,7 @@ export default function HomePage() {
   const feedListRef = useRef<HTMLDivElement | null>(null);
   const markRefs = useRef<Record<number, HTMLElement | null>>({});
   const cardRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const hoveredCommentIdRef = useRef<number | null>(null);
 
   const selectedDocument = useMemo(() => {
     const fromLibrary = libraryEntries.find((doc) => doc.id === selectedDocumentId);
@@ -100,12 +122,62 @@ export default function HomePage() {
   }, [selectedVersionId, selectedReviewJobId]);
 
   useEffect(() => {
+    if (!focusedCommentId) return;
+    const card = cardRefs.current[focusedCommentId];
+    const mark = markRefs.current[focusedCommentId];
+    card?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    mark?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+  }, [focusedCommentId]);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (!focusedCommentId) return;
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      const inComment = target.closest('.comment-card');
+      const inHighlight = target.closest('.doc-highlight');
+      if (!inComment && !inHighlight) {
+        setFocusedCommentId(null);
+      }
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [focusedCommentId]);
+
+  useEffect(() => {
+    if (comments.length === 0) return;
+    const hasAnchored = comments.some(
+      (comment) =>
+        Boolean(comment.excerpt) &&
+        comment.start_offset >= 0 &&
+        comment.end_offset > comment.start_offset
+    );
+    if (hasAnchored) {
+      setDocMode('source');
+    }
+  }, [comments]);
+
+  useEffect(() => {
     const interval = setInterval(() => {
       void loadSystemStatus();
     }, 8000);
     void loadSystemStatus();
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    if (showLibrary) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = previous || '';
+    }
+    return () => {
+      document.body.style.overflow = previous || '';
+    };
+  }, [showLibrary]);
 
   async function refreshAll() {
     setErrorMessage(null);
@@ -168,10 +240,13 @@ export default function HomePage() {
     try {
       const jobs = await apiFetch<ReviewJobRead[]>(`/review-jobs?document_version_id=${versionId}`);
       setReviewJobs(jobs);
-      const latest = jobs.length > 0 ? jobs[jobs.length - 1] : null;
-      setSelectedReviewJobId(latest?.id ?? null);
-      if (latest) {
-        const data = await loadComments(versionId, false, latest.id);
+      const latestCompleted = [...jobs]
+        .reverse()
+        .find((job) => job.status === 'completed' && Boolean(job.completed_at));
+      const preferred = latestCompleted ?? (jobs.length > 0 ? jobs[jobs.length - 1] : null);
+      setSelectedReviewJobId(preferred?.id ?? null);
+      if (preferred) {
+        const data = await loadComments(versionId, false, preferred.id);
         if (data.length === 0) {
           await loadComments(versionId, false, null);
         }
@@ -226,6 +301,138 @@ export default function HomePage() {
       void refreshAll();
     } catch (error) {
       setErrorMessage(normalizeError(error));
+    }
+  }
+
+  async function handleSetArchived(documentId: number, archived: boolean) {
+    setErrorMessage(null);
+    try {
+      await apiFetch<DocumentRead>(`/documents/${documentId}/archive`, {
+        method: 'POST',
+        body: JSON.stringify({ archived })
+      });
+      if (archived && selectedDocumentId === documentId) {
+        setSelectedDocumentId(null);
+        setSelectedVersionId(null);
+        setSelectedReviewJobId(null);
+        setVersions([]);
+        setComments([]);
+      }
+      setStatusMessage(archived ? 'Document archived.' : 'Document restored.');
+      await refreshAll();
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
+  }
+
+  async function handleDeleteDocument(documentId: number, title: string) {
+    const confirmed = window.confirm(`Delete "${title}" permanently?`);
+    if (!confirmed) return;
+    setErrorMessage(null);
+    try {
+      await apiFetch<null>(`/documents/${documentId}`, {
+        method: 'DELETE'
+      });
+      if (selectedDocumentId === documentId) {
+        setSelectedDocumentId(null);
+        setSelectedVersionId(null);
+        setSelectedReviewJobId(null);
+        setVersions([]);
+        setComments([]);
+      }
+      setStatusMessage('Document deleted.');
+      await refreshAll();
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
+  }
+
+  async function handleBulkArchive(archived: boolean) {
+    const ids = Array.from(selectedLibraryIds);
+    if (ids.length === 0) return;
+    setErrorMessage(null);
+    try {
+      setBulkProgress({ label: archived ? 'Archiving' : 'Restoring', done: 0, total: ids.length });
+      for (let idx = 0; idx < ids.length; idx += 1) {
+        const id = ids[idx];
+        await apiFetch<DocumentRead>(`/documents/${id}/archive`, {
+          method: 'POST',
+          body: JSON.stringify({ archived })
+        });
+        setBulkProgress({
+          label: archived ? 'Archiving' : 'Restoring',
+          done: idx + 1,
+          total: ids.length
+        });
+      }
+      setSelectedLibraryIds(new Set());
+      setStatusMessage(archived ? 'Selected documents archived.' : 'Selected documents restored.');
+      await refreshAll();
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setBulkProgress(null);
+    }
+  }
+
+  async function handleBulkDelete() {
+    const ids = Array.from(selectedLibraryIds);
+    if (ids.length === 0) return;
+    const confirmed = window.confirm(`Delete ${ids.length} selected documents permanently?`);
+    if (!confirmed) return;
+    setErrorMessage(null);
+    try {
+      setBulkProgress({ label: 'Deleting', done: 0, total: ids.length });
+      for (let idx = 0; idx < ids.length; idx += 1) {
+        const id = ids[idx];
+        await apiFetch<null>(`/documents/${id}`, {
+          method: 'DELETE'
+        });
+        setBulkProgress({ label: 'Deleting', done: idx + 1, total: ids.length });
+      }
+      if (selectedDocumentId && ids.includes(selectedDocumentId)) {
+        setSelectedDocumentId(null);
+        setSelectedVersionId(null);
+        setSelectedReviewJobId(null);
+        setVersions([]);
+        setComments([]);
+      }
+      setSelectedLibraryIds(new Set());
+      setStatusMessage('Selected documents deleted.');
+      await refreshAll();
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setBulkProgress(null);
+    }
+  }
+
+  async function handleBulkRerun() {
+    const targets = filteredLibraryWithSearch.filter(
+      (entry) => selectedLibraryIds.has(entry.id) && Boolean(entry.latest_version_id)
+    );
+    if (targets.length === 0) return;
+    setErrorMessage(null);
+    try {
+      setBulkProgress({ label: 'Queueing re-review', done: 0, total: targets.length });
+      for (let idx = 0; idx < targets.length; idx += 1) {
+        const entry = targets[idx];
+        await apiFetch<ReviewJobRead>('/review-jobs', {
+          method: 'POST',
+          body: JSON.stringify({
+            document_version_id: entry.latest_version_id as number,
+            trigger: 'manual'
+          })
+        });
+        setBulkProgress({ label: 'Queueing re-review', done: idx + 1, total: targets.length });
+      }
+      setSelectedLibraryIds(new Set());
+      setStatusMessage(`Queued re-review for ${targets.length} document(s).`);
+      await refreshAll();
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setBulkProgress(null);
     }
   }
 
@@ -291,6 +498,14 @@ export default function HomePage() {
     void refreshAll();
   }
 
+  async function handleOpenDocument(documentId: number) {
+    setErrorMessage(null);
+    setSelectedDocumentId(documentId);
+    await loadVersions(documentId);
+    setShowLibrary(false);
+    setStatusMessage('Loaded saved review for selected document.');
+  }
+
   function handleTenantSave() {
     setTenantId(tenantId || DEFAULT_TENANT);
     setApiBase(apiBase || 'http://localhost:8006/api');
@@ -350,11 +565,15 @@ export default function HomePage() {
   }, [personas]);
 
   const filteredLibrary = useMemo(() => {
-    if (libraryFilter === 'all') return libraryEntries;
-    if (libraryFilter === 'needs') {
-      return libraryEntries.filter((entry) => entry.needs_review);
+    if (libraryFilter === 'archived') {
+      return libraryEntries.filter((entry) => entry.is_archived);
     }
-    return libraryEntries.filter((entry) => !entry.needs_review);
+    const active = libraryEntries.filter((entry) => !entry.is_archived);
+    if (libraryFilter === 'all') return active;
+    if (libraryFilter === 'needs') {
+      return active.filter((entry) => entry.needs_review);
+    }
+    return active.filter((entry) => !entry.needs_review);
   }, [libraryEntries, libraryFilter]);
 
   const filteredLibraryWithSearch = useMemo(() => {
@@ -362,6 +581,28 @@ export default function HomePage() {
     const query = librarySearch.trim().toLowerCase();
     return filteredLibrary.filter((entry) => entry.title.toLowerCase().includes(query));
   }, [filteredLibrary, librarySearch]);
+
+  const activeCommentId = focusedCommentId ?? hoveredCommentId;
+
+  useEffect(() => {
+    hoveredCommentIdRef.current = hoveredCommentId;
+  }, [hoveredCommentId]);
+
+  const allFilteredSelected = useMemo(() => {
+    if (filteredLibraryWithSearch.length === 0) return false;
+    return filteredLibraryWithSearch.every((entry) => selectedLibraryIds.has(entry.id));
+  }, [filteredLibraryWithSearch, selectedLibraryIds]);
+
+  const showSelectionControls = isLibraryHovering || selectedLibraryIds.size > 0;
+  const hoverCenterIndex = useMemo(
+    () => visibleComments.findIndex((comment) => comment.id === hoveredCommentId),
+    [visibleComments, hoveredCommentId]
+  );
+  const focusCenterIndex = useMemo(
+    () => visibleComments.findIndex((comment) => comment.id === focusedCommentId),
+    [visibleComments, focusedCommentId]
+  );
+  const dockCenterIndex = focusedCommentId ? focusCenterIndex : hoverCenterIndex;
 
   const docSegments = useMemo(() => {
     if (!selectedVersion) return [];
@@ -392,6 +633,10 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!selectedVersion) {
+      setConnectorPaths([]);
+      return;
+    }
+    if (docMode !== 'source') {
       setConnectorPaths([]);
       return;
     }
@@ -441,7 +686,7 @@ export default function HomePage() {
       feed?.removeEventListener('scroll', onResize);
       doc?.removeEventListener('scroll', onResize);
     };
-  }, [anchoredComments, selectedVersion, personaMap, agentThemes]);
+  }, [anchoredComments, selectedVersion, personaMap, agentThemes, docMode, activeCommentId]);
 
   function updateAgentTheme(id: number, color: string, label?: string) {
     setAgentThemes((prev) => {
@@ -449,6 +694,30 @@ export default function HomePage() {
       saveAgentThemes(next);
       return next;
     });
+  }
+
+  function focusComment(commentId: number) {
+    setFocusedCommentId((prev) => (prev === commentId ? null : commentId));
+    setDocMode('source');
+  }
+
+  function handleFeedPointerMove(event: ReactMouseEvent<HTMLDivElement>) {
+    if (focusedCommentId) return;
+    const target = event.target as HTMLElement | null;
+    const card = target?.closest<HTMLElement>('.comment-card[data-comment-id]');
+    if (!card) {
+      if (hoveredCommentIdRef.current !== null) {
+        setHoveredCommentId(null);
+      }
+      return;
+    }
+    const rawId = card.dataset.commentId;
+    if (!rawId) return;
+    const nextId = Number(rawId);
+    if (!Number.isFinite(nextId)) return;
+    if (hoveredCommentIdRef.current !== nextId) {
+      setHoveredCommentId(nextId);
+    }
   }
 
   return (
@@ -540,8 +809,11 @@ export default function HomePage() {
                 key={item.id}
                 d={item.path}
                 stroke={item.color}
-                className="link-path"
-                strokeWidth={1.8}
+                className={`link-path ${activeCommentId === item.id ? 'selected' : ''}`}
+                strokeWidth={2.4}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
                 fill="none"
               />
             ))}
@@ -555,6 +827,22 @@ export default function HomePage() {
                 </div>
               </div>
               <div className="doc-badges">
+                <div className="mode-toggle">
+                  <button
+                    className={`mode-button ${docMode === 'view' ? 'active' : ''}`}
+                    type="button"
+                    onClick={() => setDocMode('view')}
+                  >
+                    View
+                  </button>
+                  <button
+                    className={`mode-button ${docMode === 'source' ? 'active' : ''}`}
+                    type="button"
+                    onClick={() => setDocMode('source')}
+                  >
+                    Source
+                  </button>
+                </div>
                 <span className="pill">{systemStatus?.redis.ok ? 'Live' : 'Paused'}</span>
                 <span className="pill">{selectedVersion.version_label}</span>
                 <button
@@ -567,8 +855,15 @@ export default function HomePage() {
               </div>
             </div>
             <article className="doc-body">
-              {docSegments.length === 0 && <pre>{selectedVersion.content}</pre>}
-              {docSegments.length > 0 && (
+              {docMode === 'view' && (
+                <div className="markdown-view">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {selectedVersion.content}
+                  </ReactMarkdown>
+                </div>
+              )}
+              {docMode === 'source' && docSegments.length === 0 && <pre>{selectedVersion.content}</pre>}
+              {docMode === 'source' && docSegments.length > 0 && (
                 <p>
                   {docSegments.map((segment, idx) => {
                     if (!segment.comment) return <span key={idx}>{segment.text}</span>;
@@ -582,7 +877,12 @@ export default function HomePage() {
                         ref={(element) => {
                           markRefs.current[segment.comment!.id] = element;
                         }}
-                        className="doc-highlight"
+                        className={`doc-highlight ${
+                          activeCommentId === segment.comment.id ? 'selected' : ''
+                        }`}
+                        onClick={() => focusComment(segment.comment!.id)}
+                        onMouseEnter={() => setHoveredCommentId(segment.comment!.id)}
+                        onMouseLeave={() => setHoveredCommentId(null)}
                         style={{ backgroundColor: `${color}22`, borderBottomColor: color }}
                       >
                         {segment.text || segment.comment.excerpt || ''}
@@ -597,8 +897,8 @@ export default function HomePage() {
           <aside className="feed-panel">
             <div className="feed-header">
               <div>
-                <div className="feed-title">Live Review Feed</div>
-                <div className="feed-sub">Comments appear as agents finish their passes.</div>
+                <div className="feed-title">Comments</div>
+                <div className="feed-sub">Anchored reviewer comments for this document version.</div>
               </div>
               <button
                 className="ghost-button"
@@ -608,23 +908,47 @@ export default function HomePage() {
                 Refresh
               </button>
             </div>
-            <div className="feed-list" ref={feedListRef}>
+            <div
+              className="feed-list"
+              ref={feedListRef}
+              onMouseMove={handleFeedPointerMove}
+              onMouseLeave={() => {
+                if (!focusedCommentId) setHoveredCommentId(null);
+              }}
+            >
               {visibleComments.length === 0 && (
-                <div className="empty-feed">Waiting for agents to post comments…</div>
+                <div className="empty-feed">Waiting for anchored comments…</div>
               )}
-              {visibleComments.map((comment) => {
+              {visibleComments.map((comment, index) => {
                 const persona = personaMap.get(comment.persona_id);
                 const color = persona
                   ? getThemeForPersona(agentThemes, persona.id, colorForPersona(persona.id))
                   : AGENT_COLORS[0];
+                const distance =
+                  dockCenterIndex >= 0 ? Math.abs(index - dockCenterIndex) : Number.POSITIVE_INFINITY;
+                let scale = 1;
+                if (distance === 0) scale = 2;
+                else if (distance === 1) scale = 1.26;
+                else if (distance === 2) scale = 1.08;
+                const shift = scale > 1 ? -Math.round((scale - 1) * 62) : 0;
+                const zIndex = distance === 0 ? 140 : distance === 1 ? 80 : distance === 2 ? 48 : 1;
                 return (
                   <div
                     key={comment.id}
                     ref={(element) => {
                       cardRefs.current[comment.id] = element;
                     }}
-                    className={`comment-card ${recentCommentIds.has(comment.id) ? 'new' : ''}`}
-                    style={{ borderLeftColor: color }}
+                    data-comment-id={comment.id}
+                    className={`comment-card ${recentCommentIds.has(comment.id) ? 'new' : ''} ${
+                      activeCommentId === comment.id ? 'selected' : ''
+                    } ${activeCommentId && activeCommentId !== comment.id ? 'dimmed' : ''}`}
+                    style={{
+                      borderLeftColor: color,
+                      ['--dock-scale' as '--dock-scale']: scale,
+                      ['--dock-shift' as '--dock-shift']: `${shift}px`,
+                      zIndex
+                    } as CSSProperties}
+                    onClick={() => focusComment(comment.id)}
                   >
                     <div className="comment-head">
                       <div className="comment-agent">
@@ -726,6 +1050,13 @@ export default function HomePage() {
                   >
                     Reviewed
                   </button>
+                  <button
+                    className={`filter-chip ${libraryFilter === 'archived' ? 'active' : ''}`}
+                    type="button"
+                    onClick={() => setLibraryFilter('archived')}
+                  >
+                    Archived
+                  </button>
                 </div>
                 <input
                   className="library-search"
@@ -736,12 +1067,85 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="library-grid">
+            {(showSelectionControls || bulkProgress) && (
+              <div className="bulk-bar">
+              <label className="bulk-select-all">
+                <input
+                  type="checkbox"
+                  checked={allFilteredSelected}
+                  disabled={bulkProgress !== null || !showSelectionControls}
+                  onChange={(event) => {
+                    const next = new Set(selectedLibraryIds);
+                    if (event.target.checked) {
+                      for (const entry of filteredLibraryWithSearch) {
+                        next.add(entry.id);
+                      }
+                    } else {
+                      for (const entry of filteredLibraryWithSearch) {
+                        next.delete(entry.id);
+                      }
+                    }
+                    setSelectedLibraryIds(next);
+                  }}
+                />
+                Select all ({filteredLibraryWithSearch.length})
+              </label>
+              {bulkProgress && (
+                <div className="bulk-progress">
+                  {bulkProgress.label} {bulkProgress.done}/{bulkProgress.total}
+                </div>
+              )}
+              <div className="bulk-actions">
+                <button
+                  className="ghost-button"
+                  type="button"
+                  disabled={selectedLibraryIds.size === 0 || bulkProgress !== null}
+                  onClick={() => void handleBulkArchive(true)}
+                >
+                  Archive Selected
+                </button>
+                <button
+                  className="ghost-button"
+                  type="button"
+                  disabled={selectedLibraryIds.size === 0 || bulkProgress !== null}
+                  onClick={() => void handleBulkArchive(false)}
+                >
+                  Restore Selected
+                </button>
+                <button
+                  className="ghost-button"
+                  type="button"
+                  disabled={selectedLibraryIds.size === 0 || bulkProgress !== null}
+                  onClick={() => void handleBulkRerun()}
+                >
+                  Re-run Selected
+                </button>
+                <button
+                  className="ghost-button danger-button"
+                  type="button"
+                  disabled={selectedLibraryIds.size === 0 || bulkProgress !== null}
+                  onClick={() => void handleBulkDelete()}
+                >
+                  Delete Selected
+                </button>
+              </div>
+              </div>
+            )}
+
+            <div
+              className="library-grid"
+              onMouseEnter={() => setIsLibraryHovering(true)}
+              onMouseLeave={() => setIsLibraryHovering(false)}
+            >
               {filteredLibraryWithSearch.length === 0 && (
                 <div className="subtle">No documents yet.</div>
               )}
               {filteredLibraryWithSearch.map((entry) => {
-                const statusLabel = entry.needs_review ? 'Needs Review' : 'Reviewed';
+                const statusLabel = entry.is_archived
+                  ? 'Archived'
+                  : entry.needs_review
+                    ? 'Needs Review'
+                    : 'Reviewed';
                 const versionLabel = entry.latest_version_label ?? 'No versions yet';
                 const lastEdited = entry.latest_version_created_at
                   ? new Date(entry.latest_version_created_at).toLocaleString()
@@ -753,50 +1157,105 @@ export default function HomePage() {
                   <div key={entry.id} className={`library-card ${entry.needs_review ? 'needs' : 'ready'}`}>
                     <div className="review-ribbon" />
                     <div className="library-card-body">
-                      <div className="library-card-title">{entry.title}</div>
-                      <div className="library-card-meta">
-                        <span className="meta-pill">{versionLabel}</span>
-                        <span className={`status-pill ${entry.needs_review ? 'warn' : 'ok'}`}>
-                          {statusLabel}
-                        </span>
-                      </div>
-                      <div className="library-timeline">
-                        <div>
-                          <div className="timeline-label">Last edit</div>
-                          <div className="timeline-value">{lastEdited}</div>
+                      <button
+                        className="library-delete-btn"
+                        type="button"
+                        disabled={bulkProgress !== null}
+                        onClick={() => void handleDeleteDocument(entry.id, entry.title)}
+                        aria-label={`Delete ${entry.title}`}
+                      >
+                        ×
+                      </button>
+                      <label className={`library-select ${showSelectionControls ? 'visible' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={selectedLibraryIds.has(entry.id)}
+                          disabled={bulkProgress !== null || !showSelectionControls}
+                          onChange={(event) => {
+                            const next = new Set(selectedLibraryIds);
+                            if (event.target.checked) {
+                              next.add(entry.id);
+                            } else {
+                              next.delete(entry.id);
+                            }
+                            setSelectedLibraryIds(next);
+                          }}
+                        />
+                      </label>
+                      <div className="library-card-summary">
+                        <div className="library-card-title">{entry.title}</div>
+                        <div className="library-card-meta">
+                          <span
+                            className={`status-pill ${
+                              entry.is_archived ? 'neutral' : entry.needs_review ? 'warn' : 'ok'
+                            }`}
+                          >
+                            {statusLabel}
+                          </span>
                         </div>
-                        <div>
-                          <div className="timeline-label">Last review</div>
-                          <div className="timeline-value">{lastReviewed}</div>
-                        </div>
                       </div>
-                      <div className="library-card-actions">
+                      <div className="library-card-detail">
+                        <div className="library-card-meta">
+                          <span className="meta-pill">{versionLabel}</span>
+                        </div>
+                        <div className="library-timeline">
+                          <div>
+                            <div className="timeline-label">Last edit</div>
+                            <div className="timeline-value">{lastEdited}</div>
+                          </div>
+                          <div>
+                            <div className="timeline-label">Last review</div>
+                            <div className="timeline-value">{lastReviewed}</div>
+                          </div>
+                        </div>
+                        <div className="library-card-actions">
                         <button
                           className="ghost-button"
                           type="button"
                           onClick={() => {
-                            setSelectedDocumentId(entry.id);
-                            void loadVersions(entry.id);
-                            setShowLibrary(false);
+                            void handleOpenDocument(entry.id);
                           }}
                         >
                           Open
                         </button>
-                        <button
-                          className="primary-button"
-                          type="button"
-                          disabled={!entry.latest_version_id}
-                          onClick={() => {
-                            if (!entry.latest_version_id) return;
-                            setSelectedDocumentId(entry.id);
-                            setShowLibrary(false);
-                            void loadVersions(entry.id).then(() =>
-                              handleRunReview(entry.latest_version_id as number)
-                            );
-                          }}
-                        >
-                          Run Review
-                        </button>
+                          <button
+                            className="primary-button"
+                            type="button"
+                            disabled={!entry.latest_version_id}
+                            onClick={() => {
+                              if (!entry.latest_version_id) return;
+                              setSelectedDocumentId(entry.id);
+                              setShowLibrary(false);
+                              void loadVersions(entry.id).then(() =>
+                                handleRunReview(entry.latest_version_id as number)
+                              );
+                            }}
+                          >
+                            Run Review
+                          </button>
+                          <button
+                            className="ghost-button"
+                            type="button"
+                            disabled={!entry.latest_version_id}
+                            onClick={() => {
+                              if (!entry.latest_version_id) return;
+                              setSelectedDocumentId(entry.id);
+                              setShowLibrary(false);
+                              void loadVersions(entry.id).then(() =>
+                                handleRunReview(entry.latest_version_id as number)
+                              );
+                            }}
+                          >
+                            Re-run
+                          </button>
+                          <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={() => void handleSetArchived(entry.id, !entry.is_archived)}
+                          >
+                            {entry.is_archived ? 'Restore' : 'Archive'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -831,6 +1290,7 @@ export default function HomePage() {
           </button>
         </div>
       )}
+
     </main>
   );
 }

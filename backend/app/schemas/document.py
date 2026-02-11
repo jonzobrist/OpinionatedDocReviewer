@@ -15,9 +15,15 @@ class DocumentUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
 
 
+class DocumentArchiveUpdate(BaseModel):
+    archived: bool
+
+
 class DocumentRead(DocumentBase):
     id: int
     tenant_id: str
+    is_archived: bool
+    archived_at: datetime | None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -27,6 +33,8 @@ class DocumentLibraryEntry(BaseModel):
     id: int
     tenant_id: str
     title: str
+    is_archived: bool
+    archived_at: datetime | None
     created_at: datetime
     latest_version_id: int | None
     latest_version_label: str | None

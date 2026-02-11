@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.db import models
@@ -12,13 +13,13 @@ def create_document(db: Session, tenant_id: str, data: DocumentCreate) -> models
     return doc
 
 
-def list_documents(db: Session, tenant_id: str) -> list[models.Document]:
-    return (
-        db.query(models.Document)
-        .filter(models.Document.tenant_id == tenant_id)
-        .order_by(models.Document.id.asc())
-        .all()
-    )
+def list_documents(
+    db: Session, tenant_id: str, include_archived: bool = False
+) -> list[models.Document]:
+    query = db.query(models.Document).filter(models.Document.tenant_id == tenant_id)
+    if not include_archived:
+        query = query.filter(models.Document.is_archived.is_(False))
+    return query.order_by(models.Document.id.asc()).all()
 
 
 def get_document(db: Session, tenant_id: str, document_id: int) -> models.Document | None:
@@ -55,8 +56,23 @@ def delete_document(db: Session, tenant_id: str, document_id: int) -> bool:
     return True
 
 
-def list_document_library(db: Session, tenant_id: str) -> list[dict]:
-    docs = list_documents(db, tenant_id)
+def set_document_archived(
+    db: Session, tenant_id: str, document_id: int, archived: bool
+) -> models.Document | None:
+    doc = get_document(db, tenant_id, document_id)
+    if not doc:
+        return None
+    doc.is_archived = archived
+    doc.archived_at = datetime.now(timezone.utc) if archived else None
+    db.commit()
+    db.refresh(doc)
+    return doc
+
+
+def list_document_library(
+    db: Session, tenant_id: str, include_archived: bool = True
+) -> list[dict]:
+    docs = list_documents(db, tenant_id, include_archived=include_archived)
     entries: list[dict] = []
     for doc in docs:
         latest_version = (
@@ -98,6 +114,8 @@ def list_document_library(db: Session, tenant_id: str) -> list[dict]:
                 "id": doc.id,
                 "tenant_id": doc.tenant_id,
                 "title": doc.title,
+                "is_archived": doc.is_archived,
+                "archived_at": doc.archived_at,
                 "created_at": doc.created_at,
                 "latest_version_id": latest_version.id if latest_version else None,
                 "latest_version_label": latest_version.version_label if latest_version else None,

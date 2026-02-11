@@ -2,6 +2,8 @@ export type DocumentRead = {
   id: number;
   tenant_id: string;
   title: string;
+  is_archived: boolean;
+  archived_at: string | null;
   created_at: string;
 };
 
@@ -9,6 +11,8 @@ export type DocumentLibraryEntry = {
   id: number;
   tenant_id: string;
   title: string;
+  is_archived: boolean;
+  archived_at: string | null;
   created_at: string;
   latest_version_id: number | null;
   latest_version_label: string | null;
