@@ -1057,6 +1057,22 @@ function HomePageContent() {
   }
 
   useEffect(() => {
+    if (!hoveredCommentId || focusedCommentId) return;
+    const onPointerMove = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      const inFeed = Boolean(target.closest('.feed-panel'));
+      if (!inFeed) {
+        setHoveredCommentId(null);
+      }
+    };
+    window.addEventListener('pointermove', onPointerMove);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+    };
+  }, [hoveredCommentId, focusedCommentId]);
+
+  useEffect(() => {
     if (normalizedPath !== '/') return;
     const docRaw = searchParams.get('doc');
     if (!docRaw) return;
@@ -1470,7 +1486,12 @@ function HomePageContent() {
             </article>
           </div>
 
-          <aside className="feed-panel">
+          <aside
+            className="feed-panel"
+            onMouseLeave={() => {
+              if (!focusedCommentId) setHoveredCommentId(null);
+            }}
+          >
             <div className="feed-header">
               <div>
                 <div className="feed-title">Comments</div>
@@ -1488,9 +1509,7 @@ function HomePageContent() {
               className="feed-list"
               ref={feedListRef}
               onMouseMove={handleFeedPointerMove}
-              onMouseLeave={() => {
-                if (!focusedCommentId) setHoveredCommentId(null);
-              }}
+              onMouseLeave={() => setHoveredCommentId(null)}
             >
               {visibleComments.length === 0 && (
                 <div className="empty-feed">Waiting for anchored comments…</div>
