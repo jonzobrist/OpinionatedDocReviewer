@@ -39,6 +39,8 @@ def test_comments_and_review_jobs(client, monkeypatch) -> None:
     )
     assert job_resp.status_code == 201
     assert job_resp.json()["status"] == "queued"
+    assert job_resp.json()["provider"] in {"openai", "bedrock"}
+    assert isinstance(job_resp.json()["model"], str)
 
     comment_payload = {
         "persona_id": persona_id,

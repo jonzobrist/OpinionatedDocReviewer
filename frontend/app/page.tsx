@@ -11,6 +11,7 @@ import {
 } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import JSZip from 'jszip';
 import {
   apiFetch,
   DEFAULT_TENANT,
@@ -43,6 +44,52 @@ const AGENT_COLORS = ['#1d8a7a', '#2d6eea', '#b7482f', '#7a4bd3', '#c57a1b', '#0
 
 type DocSegment = { text: string; comment?: CommentRead };
 type ConnectorPath = { id: number; path: string; color: string };
+
+function MermaidDiagram({ chart }: { chart: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const chartIdRef = useRef(`mermaid-${Math.random().toString(36).slice(2)}`);
+
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    const run = async () => {
+      const target = containerRef.current;
+      if (!target) return;
+      try {
+        const mod = await import('mermaid');
+        const mermaid = mod.default;
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: 'strict',
+          theme: 'neutral',
+          suppressErrorRendering: true
+        });
+        const result = await mermaid.render(chartIdRef.current, chart);
+        if (cancelled || !containerRef.current) return;
+        containerRef.current.innerHTML = result.svg;
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Mermaid rendering failed');
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [chart]);
+
+  if (error) {
+    return (
+      <div className="mermaid-fallback">
+        Mermaid render error: {error}
+        <pre>{chart}</pre>
+      </div>
+    );
+  }
+
+  return <div className="mermaid-diagram" ref={containerRef} />;
+}
 
 export default function HomePage() {
   const [apiBase, setApiBaseState] = useState('');
@@ -86,6 +133,7 @@ export default function HomePage() {
     done: number;
     total: number;
   } | null>(null);
+  const [isReviewStarting, setIsReviewStarting] = useState(false);
   const [connectorPaths, setConnectorPaths] = useState<ConnectorPath[]>([]);
   const lastPollRef = useRef<number>(Date.now());
   const workspaceRef = useRef<HTMLElement | null>(null);
@@ -105,6 +153,10 @@ export default function HomePage() {
     () => versions.find((version) => version.id === selectedVersionId) ?? null,
     [versions, selectedVersionId]
   );
+  const selectedReviewJob = useMemo(
+    () => reviewJobs.find((job) => job.id === selectedReviewJobId) ?? null,
+    [reviewJobs, selectedReviewJobId]
+  );
 
   useEffect(() => {
     setApiBaseState(getApiBase());
@@ -120,6 +172,14 @@ export default function HomePage() {
     if (!selectedVersionId) return;
     const interval = setInterval(() => {
       void loadComments(selectedVersionId, true, selectedReviewJobId);
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [selectedVersionId, selectedReviewJobId]);
+
+  useEffect(() => {
+    if (!selectedVersionId) return;
+    const interval = setInterval(() => {
+      void loadReviewJobsSnapshot(selectedVersionId);
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [selectedVersionId, selectedReviewJobId]);
@@ -148,19 +208,6 @@ export default function HomePage() {
       window.removeEventListener('pointerdown', onPointerDown);
     };
   }, [focusedCommentId]);
-
-  useEffect(() => {
-    if (comments.length === 0) return;
-    const hasAnchored = comments.some(
-      (comment) =>
-        Boolean(comment.excerpt) &&
-        comment.start_offset >= 0 &&
-        comment.end_offset > comment.start_offset
-    );
-    if (hasAnchored) {
-      setDocMode('source');
-    }
-  }, [comments]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -276,6 +323,29 @@ export default function HomePage() {
     }
   }
 
+  async function loadReviewJobsSnapshot(versionId: number) {
+    try {
+      const jobs = await apiFetch<ReviewJobRead[]>(`/review-jobs?document_version_id=${versionId}`);
+      setReviewJobs(jobs);
+      if (jobs.length === 0) {
+        setSelectedReviewJobId(null);
+        return;
+      }
+      const selectedExists =
+        selectedReviewJobId !== null && jobs.some((job) => job.id === selectedReviewJobId);
+      if (!selectedExists) {
+        const latest = jobs[jobs.length - 1];
+        setSelectedReviewJobId(latest?.id ?? null);
+      }
+      const running = jobs.some((job) => job.status === 'queued' || job.status === 'running');
+      if (!running) {
+        setIsReviewStarting(false);
+      }
+    } catch {
+      // Snapshot polling should not surface transient errors in the primary UI flow.
+    }
+  }
+
   async function loadComments(
     versionId: number,
     markRecent: boolean,
@@ -305,20 +375,30 @@ export default function HomePage() {
     }
   }
 
-  async function handleRunReview(versionId: number) {
+  async function handleRunReview(versionId: number, options?: { requireConfirm?: boolean }) {
+    if (options?.requireConfirm ?? true) {
+      const proceed = window.confirm(
+        'Start a new review run? Existing comments are preserved; this adds a new run.'
+      );
+      if (!proceed) return;
+    }
     setErrorMessage(null);
+    setIsReviewStarting(true);
     try {
       const job = await apiFetch<ReviewJobRead>('/review-jobs', {
         method: 'POST',
         body: JSON.stringify({ document_version_id: versionId, trigger: 'manual' })
       });
-      setReviewJobs((prev) => [...prev, job]);
+      setReviewJobs((prev) => [...prev.filter((item) => item.id !== job.id), job]);
       setSelectedReviewJobId(job.id);
       setStatusMessage('Review started. Comments will arrive shortly.');
       await loadComments(versionId, false, job.id);
+      await loadReviewJobsSnapshot(versionId);
       void refreshAll();
     } catch (error) {
       setErrorMessage(normalizeError(error));
+    } finally {
+      setIsReviewStarting(false);
     }
   }
 
@@ -430,6 +510,8 @@ export default function HomePage() {
       (entry) => selectedLibraryIds.has(entry.id) && Boolean(entry.latest_version_id)
     );
     if (targets.length === 0) return;
+    const confirmed = window.confirm(`Queue re-review for ${targets.length} selected document(s)?`);
+    if (!confirmed) return;
     setErrorMessage(null);
     try {
       setBulkProgress({ label: 'Queueing re-review', done: 0, total: targets.length });
@@ -796,6 +878,161 @@ export default function HomePage() {
     }
   }
 
+  function downloadFile(filename: string, content: string, mime = 'text/plain;charset=utf-8') {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleDownloadReviewedMarkdown() {
+    if (!selectedVersion) return;
+    const context = buildCommentExportContext();
+    if (!context) return;
+    const header = [
+      `# ${context.title}`,
+      '',
+      `Version: ${selectedVersion.version_label}`,
+      `Review job: ${selectedReviewJob?.id ?? 'n/a'}`,
+      `Provider/model: ${selectedReviewJob ? `${selectedReviewJob.provider}/${selectedReviewJob.model}` : 'n/a'}`,
+      ''
+    ].join('\n');
+    downloadFile(`${context.safeTitle}_reviewed.md`, `${header}${selectedVersion.content}`);
+  }
+
+  function buildCommentExportContext() {
+    if (!selectedVersion) return null;
+    const title = selectedDocument?.title ?? `document-${selectedVersion.document_id}`;
+    const safeTitle = title.replace(/[^a-zA-Z0-9-_]+/g, '_');
+    const sorted = [...visibleComments].sort((a, b) => a.start_offset - b.start_offset);
+    const reviewMeta = {
+      review_job_id: selectedReviewJob?.id ?? null,
+      provider: selectedReviewJob?.provider ?? null,
+      model: selectedReviewJob?.model ?? null
+    };
+    return { title, safeTitle, sorted, reviewMeta };
+  }
+
+  function buildCommentsJson() {
+    if (!selectedVersion) return null;
+    const context = buildCommentExportContext();
+    if (!context) return null;
+    return {
+      document_id: selectedVersion.document_id,
+      document_title: context.title,
+      version_id: selectedVersion.id,
+      version_label: selectedVersion.version_label,
+      review_job_id: context.reviewMeta.review_job_id,
+      provider: context.reviewMeta.provider,
+      model: context.reviewMeta.model,
+      comments: context.sorted
+    };
+  }
+
+  function buildCommentsMarkdown() {
+    if (!selectedVersion) return null;
+    const context = buildCommentExportContext();
+    if (!context) return null;
+    const lines = [
+      `# Comments for ${context.title}`,
+      '',
+      `Version: ${selectedVersion.version_label}`,
+      `Review job: ${context.reviewMeta.review_job_id ?? 'n/a'}`,
+      `Provider/model: ${
+        context.reviewMeta.provider && context.reviewMeta.model
+          ? `${context.reviewMeta.provider}/${context.reviewMeta.model}`
+          : 'n/a'
+      }`,
+      ''
+    ];
+    for (const comment of context.sorted) {
+      const persona = personaMap.get(comment.persona_id);
+      lines.push(`- [${persona?.name ?? `Agent ${comment.persona_id}`}] ${comment.text}`);
+      if (comment.excerpt) {
+        lines.push(`  - Excerpt: "${comment.excerpt}"`);
+      }
+    }
+    return { safeTitle: context.safeTitle, markdown: lines.join('\n') };
+  }
+
+  async function handleDownloadBundleZip() {
+    if (!selectedVersion) return;
+    const context = buildCommentExportContext();
+    const commentsJson = buildCommentsJson();
+    const commentsMd = buildCommentsMarkdown();
+    if (!context || !commentsJson || !commentsMd) return;
+
+    const zip = new JSZip();
+    const docHeader = [
+      `# ${context.title}`,
+      '',
+      `Version: ${selectedVersion.version_label}`,
+      `Review job: ${context.reviewMeta.review_job_id ?? 'n/a'}`,
+      `Provider/model: ${
+        context.reviewMeta.provider && context.reviewMeta.model
+          ? `${context.reviewMeta.provider}/${context.reviewMeta.model}`
+          : 'n/a'
+      }`,
+      ''
+    ].join('\n');
+    zip.file(`${context.safeTitle}_reviewed.md`, `${docHeader}${selectedVersion.content}`);
+    zip.file(`${context.safeTitle}_comments.md`, commentsMd.markdown);
+    zip.file(`${context.safeTitle}_comments.json`, JSON.stringify(commentsJson, null, 2));
+    zip.file(
+      'manifest.json',
+      JSON.stringify(
+        {
+          exported_at: new Date().toISOString(),
+          document_title: context.title,
+          version_id: selectedVersion.id,
+          version_label: selectedVersion.version_label,
+          review: context.reviewMeta,
+          files: [
+            `${context.safeTitle}_reviewed.md`,
+            `${context.safeTitle}_comments.md`,
+            `${context.safeTitle}_comments.json`
+          ]
+        },
+        null,
+        2
+      )
+    );
+
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${context.safeTitle}_review_bundle.zip`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleDownloadComments(format: 'json' | 'md') {
+    if (!selectedVersion) return;
+    const context = buildCommentExportContext();
+    if (!context) return;
+    if (format === 'json') {
+      const payload = buildCommentsJson();
+      if (!payload) return;
+      downloadFile(
+        `${context.safeTitle}_comments.json`,
+        JSON.stringify(payload, null, 2),
+        'application/json;charset=utf-8'
+      );
+      return;
+    }
+    const commentsMd = buildCommentsMarkdown();
+    if (!commentsMd) return;
+    downloadFile(`${context.safeTitle}_comments.md`, commentsMd.markdown);
+  }
+
   return (
     <main>
       <div className="topbar">
@@ -904,6 +1141,9 @@ export default function HomePage() {
                 <div className="doc-title">{selectedDocument?.title ?? 'Untitled document'}</div>
                 <div className="doc-meta">
                   {visibleComments.length} comments · {enabledPersonas.size} active agents
+                  {selectedReviewJob
+                    ? ` · run #${selectedReviewJob.id} ${selectedReviewJob.status} (${selectedReviewJob.provider}/${selectedReviewJob.model})`
+                    : ''}
                 </div>
               </div>
               <div className="doc-badges">
@@ -925,19 +1165,67 @@ export default function HomePage() {
                 </div>
                 <span className="pill">{systemStatus?.redis.ok ? 'Live' : 'Paused'}</span>
                 <span className="pill">{selectedVersion.version_label}</span>
+                {selectedReviewJob && (
+                  <span className="pill">
+                    {selectedReviewJob.status === 'running' || selectedReviewJob.status === 'queued'
+                      ? 'Reviewing...'
+                      : selectedReviewJob.status}
+                  </span>
+                )}
+                <button className="ghost-button" type="button" onClick={handleDownloadReviewedMarkdown}>
+                  Download Doc
+                </button>
                 <button
                   className="ghost-button"
                   type="button"
-                  onClick={() => handleRunReview(selectedVersion.id)}
+                  onClick={() => handleDownloadComments('md')}
                 >
-                  Run Review
+                  Download Comments
+                </button>
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => handleDownloadComments('json')}
+                >
+                  Comments JSON
+                </button>
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => void handleDownloadBundleZip()}
+                >
+                  Download Bundle
+                </button>
+                <button
+                  className="ghost-button"
+                  type="button"
+                  disabled={isReviewStarting}
+                  onClick={() => handleRunReview(selectedVersion.id, { requireConfirm: true })}
+                >
+                  {isReviewStarting ? 'Starting...' : 'Re-run Review'}
                 </button>
               </div>
             </div>
             <article className="doc-body">
               {docMode === 'view' && (
                 <div className="markdown-view">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      code(props) {
+                        const { className, children } = props;
+                        const text = String(children ?? '').replace(/\n$/, '');
+                        const language =
+                          className?.startsWith('language-') === true
+                            ? className.slice('language-'.length)
+                            : '';
+                        if (language === 'mermaid') {
+                          return <MermaidDiagram chart={text} />;
+                        }
+                        return <code className={className}>{children}</code>;
+                      }
+                    }}
+                  >
                     {selectedVersion.content}
                   </ReactMarkdown>
                 </div>
@@ -1004,6 +1292,7 @@ export default function HomePage() {
                 const color = persona
                   ? getThemeForPersona(agentThemes, persona.id, colorForPersona(persona.id))
                   : AGENT_COLORS[0];
+                const isFailure = comment.text.toLowerCase().startsWith('review failed:');
                 const distance =
                   dockCenterIndex >= 0 ? Math.abs(index - dockCenterIndex) : Number.POSITIVE_INFINITY;
                 let scale = 1;
@@ -1021,7 +1310,9 @@ export default function HomePage() {
                     data-comment-id={comment.id}
                     className={`comment-card ${recentCommentIds.has(comment.id) ? 'new' : ''} ${
                       activeCommentId === comment.id ? 'selected' : ''
-                    } ${activeCommentId && activeCommentId !== comment.id ? 'dimmed' : ''}`}
+                    } ${activeCommentId && activeCommentId !== comment.id ? 'dimmed' : ''} ${
+                      isFailure ? 'error' : ''
+                    }`}
                     style={{
                       borderLeftColor: color,
                       ['--dock-scale' as '--dock-scale']: scale,
@@ -1079,6 +1370,29 @@ export default function HomePage() {
             {showHistory && (
               <div className="drawer">
                 <div className="drawer-title">History</div>
+                <div className="history-list">
+                  {reviewJobs.length === 0 && <div className="subtle">No review runs yet.</div>}
+                  {reviewJobs
+                    .slice()
+                    .reverse()
+                    .map((job) => (
+                      <div key={job.id} className="history-item">
+                        <div>
+                          <div className="history-msg">
+                            #{job.id} {job.status} via {job.provider}/{job.model}
+                          </div>
+                          <div className="history-time">
+                            {new Date(job.created_at).toLocaleString()}
+                            {job.completed_at ? ` - completed ${new Date(job.completed_at).toLocaleString()}` : ''}
+                          </div>
+                        </div>
+                        <span className="pill">{job.trigger}</span>
+                      </div>
+                    ))}
+                </div>
+                <div className="drawer-title" style={{ marginTop: 12 }}>
+                  Commits
+                </div>
                 <div className="history-list">
                   {history.length === 0 && <div className="subtle">No commits yet.</div>}
                   {history.map((commit) => (
@@ -1307,7 +1621,9 @@ export default function HomePage() {
                               setSelectedDocumentId(entry.id);
                               setShowLibrary(false);
                               void loadVersions(entry.id).then(() =>
-                                handleRunReview(entry.latest_version_id as number)
+                                handleRunReview(entry.latest_version_id as number, {
+                                  requireConfirm: false
+                                })
                               );
                             }}
                           >
@@ -1322,7 +1638,9 @@ export default function HomePage() {
                               setSelectedDocumentId(entry.id);
                               setShowLibrary(false);
                               void loadVersions(entry.id).then(() =>
-                                handleRunReview(entry.latest_version_id as number)
+                                handleRunReview(entry.latest_version_id as number, {
+                                  requireConfirm: true
+                                })
                               );
                             }}
                           >

@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app.db import models
+from app.reviews.llm_provider import get_model_label, get_provider_name
 from app.schemas.review_job import ReviewJobCreate
 
 
@@ -10,6 +11,8 @@ def create_job(db: Session, tenant_id: str, data: ReviewJobCreate) -> models.Rev
         document_version_id=data.document_version_id,
         status="queued",
         trigger=data.trigger or "auto",
+        provider=get_provider_name(),
+        model=get_model_label(),
     )
     db.add(job)
     db.commit()

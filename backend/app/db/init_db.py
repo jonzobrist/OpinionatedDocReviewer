@@ -83,6 +83,18 @@ def _ensure_schema() -> None:
         _ensure_column(
             connection,
             "review_jobs",
+            "provider",
+            "TEXT DEFAULT 'openai'",
+        )
+        _ensure_column(
+            connection,
+            "review_jobs",
+            "model",
+            "TEXT DEFAULT 'gpt-4o-mini'",
+        )
+        _ensure_column(
+            connection,
+            "review_jobs",
             "completed_at",
             "DATETIME",
         )
@@ -106,6 +118,12 @@ def _ensure_schema() -> None:
         )
         connection.execute(
             text("UPDATE review_jobs SET trigger='auto' WHERE trigger IS NULL")
+        )
+        connection.execute(
+            text("UPDATE review_jobs SET provider='openai' WHERE provider IS NULL OR provider=''")
+        )
+        connection.execute(
+            text("UPDATE review_jobs SET model='gpt-4o-mini' WHERE model IS NULL OR model=''")
         )
         connection.execute(
             text("UPDATE documents SET is_archived=0 WHERE is_archived IS NULL")

@@ -352,6 +352,30 @@ main {
   overflow-x: auto;
 }
 
+.mermaid-diagram {
+  margin: 12px 0;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--surface-3);
+  background: var(--surface-1);
+  overflow-x: auto;
+}
+
+.mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+.mermaid-fallback {
+  border-radius: 10px;
+  border: 1px solid rgba(183, 72, 47, 0.35);
+  background: rgba(183, 72, 47, 0.08);
+  padding: 10px;
+  color: #7a2f20;
+}
+
 .doc-body mark {
   background: rgba(29, 138, 122, 0.15);
   border-bottom: 2px solid var(--accent-500);
@@ -453,6 +477,11 @@ main {
   opacity: 0.42;
   filter: saturate(0.7);
   transform: scale(0.98);
+}
+
+.comment-card.error {
+  background: rgba(183, 72, 47, 0.09);
+  box-shadow: 0 0 0 1px rgba(183, 72, 47, 0.24), 0 8px 18px rgba(15, 24, 34, 0.08);
 }
 
 .comment-zoom-layer {

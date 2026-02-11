@@ -102,6 +102,8 @@ export type ReviewJobRead = {
   document_version_id: number;
   status: string;
   trigger: string;
+  provider: string;
+  model: string;
   completed_at: string | null;
   created_at: string;
 };

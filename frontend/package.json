@@ -11,6 +11,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "jszip": "^3.10.1",
+    "mermaid": "^11.12.2",
     "next": "15.5.10",
     "react": "19.1.1",
     "react-dom": "19.1.1",

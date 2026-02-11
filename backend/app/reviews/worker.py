@@ -12,7 +12,7 @@ from app.reviews.parsing import parse_bullets, persist_comment_payloads
 from app.reviews.git_repo import ensure_repo
 from app.reviews.review_storage import write_review_and_commit
 from datetime import datetime, timezone
-from app.reviews.llm_provider import generate_completion, get_model_label, get_provider_name
+from app.reviews.llm_provider import generate_completion, get_provider_name
 
 
 def run_review_job(review_job_id: int, tenant_id: str) -> None:
@@ -138,8 +138,8 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
                     "status": job.status,
                     "trigger": job.trigger,
                     "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-                    "provider": get_provider_name(),
-                    "model": get_model_label(),
+                    "provider": job.provider,
+                    "model": job.model,
                     "results": results,
                 }
                 write_review_and_commit(repo, version.id, review_job_id, payload)

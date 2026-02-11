@@ -13,6 +13,8 @@ class ReviewJobRead(BaseModel):
     document_version_id: int
     status: str = Field(min_length=1, max_length=50)
     trigger: str
+    provider: str
+    model: str
     completed_at: datetime | None
     created_at: datetime
 
