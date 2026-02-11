@@ -1557,7 +1557,6 @@ function HomePageContent() {
                         {new Date(comment.created_at).toLocaleTimeString()}
                       </span>
                     </div>
-                    {comment.excerpt && <div className="comment-excerpt">“{comment.excerpt}”</div>}
                     <div className="comment-text">{comment.text}</div>
                   </div>
                 );
