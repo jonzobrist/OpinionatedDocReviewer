@@ -34,6 +34,7 @@ import {
   DocumentVersionRead,
   PersonaRead,
   ReviewJobRead,
+  SystemConfigRead,
   SystemStatus
 } from '../src/lib/types';
 
@@ -55,6 +56,7 @@ export default function HomePage() {
   const [personas, setPersonas] = useState<PersonaRead[]>([]);
   const [history, setHistory] = useState<DocumentCommitRead[]>([]);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [systemConfig, setSystemConfig] = useState<SystemConfigRead | null>(null);
 
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
@@ -169,6 +171,12 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    if (showSettings) {
+      void loadSystemConfig();
+    }
+  }, [showSettings]);
+
+  useEffect(() => {
     const previous = document.body.style.overflow;
     if (showLibrary) {
       document.body.style.overflow = 'hidden';
@@ -205,6 +213,15 @@ export default function HomePage() {
       setSystemStatus(status);
     } catch {
       setSystemStatus(null);
+    }
+  }
+
+  async function loadSystemConfig() {
+    try {
+      const cfg = await apiFetch<SystemConfigRead>('/settings');
+      setSystemConfig(cfg);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
     }
   }
 
@@ -512,6 +529,64 @@ export default function HomePage() {
     setApiBase(apiBase || 'http://localhost:8006/api');
     setStatusMessage('Connection settings saved.');
     void refreshAll();
+  }
+
+  async function handleSystemConfigSave() {
+    if (!systemConfig) return;
+    try {
+      const payload = {
+        llm_provider: systemConfig.llm_provider,
+        openai_model: systemConfig.openai_model,
+        openai_max_tokens: systemConfig.openai_max_tokens,
+        openai_temperature: systemConfig.openai_temperature,
+        openai_timeout_seconds: systemConfig.openai_timeout_seconds,
+        bedrock_model_id: systemConfig.bedrock_model_id,
+        bedrock_region: systemConfig.bedrock_region,
+        review_inline: systemConfig.review_inline
+      };
+      const next = await apiFetch<SystemConfigRead>('/settings', {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      setSystemConfig(next);
+      setStatusMessage('Backend review settings saved.');
+      void loadSystemStatus();
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
+  }
+
+  async function handleSaveSecret(
+    field:
+      | 'openai_api_key'
+      | 'bedrock_aws_access_key_id'
+      | 'bedrock_aws_secret_access_key'
+      | 'bedrock_aws_session_token',
+    value: string
+  ) {
+    if (!systemConfig) return;
+    try {
+      const payload = {
+        llm_provider: systemConfig.llm_provider,
+        openai_model: systemConfig.openai_model,
+        openai_max_tokens: systemConfig.openai_max_tokens,
+        openai_temperature: systemConfig.openai_temperature,
+        openai_timeout_seconds: systemConfig.openai_timeout_seconds,
+        bedrock_model_id: systemConfig.bedrock_model_id,
+        bedrock_region: systemConfig.bedrock_region,
+        review_inline: systemConfig.review_inline,
+        [field]: value
+      };
+      const next = await apiFetch<SystemConfigRead>('/settings', {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      setSystemConfig(next);
+      setStatusMessage('Secret updated.');
+      void loadSystemStatus();
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
   }
   function togglePersona(id: number) {
     setEnabledPersonas((prev) => {
@@ -1274,6 +1349,90 @@ export default function HomePage() {
       {showSettings && (
         <div className="floating-panel">
           <div className="drawer-title">System</div>
+          <label className="subtle">LLM Provider</label>
+          <select
+            className="input"
+            value={systemConfig?.llm_provider ?? 'openai'}
+            onChange={(event) =>
+              setSystemConfig((prev) =>
+                prev
+                  ? { ...prev, llm_provider: event.target.value as 'openai' | 'bedrock' }
+                  : prev
+              )
+            }
+          >
+            <option value="openai">OpenAI</option>
+            <option value="bedrock">AWS Bedrock</option>
+          </select>
+          <div className="spacer" />
+          <label className="subtle">OpenAI Model</label>
+          <input
+            className="input"
+            value={systemConfig?.openai_model ?? ''}
+            onChange={(event) =>
+              setSystemConfig((prev) =>
+                prev ? { ...prev, openai_model: event.target.value } : prev
+              )
+            }
+            placeholder="gpt-4o-mini"
+          />
+          <div className="spacer" />
+          <label className="subtle">OpenAI Max Tokens</label>
+          <input
+            className="input"
+            type="number"
+            value={systemConfig?.openai_max_tokens ?? 700}
+            onChange={(event) =>
+              setSystemConfig((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      openai_max_tokens: Math.max(1, Number(event.target.value) || 1)
+                    }
+                  : prev
+              )
+            }
+          />
+          <div className="spacer" />
+          <label className="subtle">Bedrock Model ID</label>
+          <input
+            className="input"
+            value={systemConfig?.bedrock_model_id ?? ''}
+            onChange={(event) =>
+              setSystemConfig((prev) =>
+                prev ? { ...prev, bedrock_model_id: event.target.value } : prev
+              )
+            }
+            placeholder="anthropic.claude-3-5-haiku-20241022-v1:0"
+          />
+          <div className="spacer" />
+          <label className="subtle">Bedrock Region</label>
+          <input
+            className="input"
+            value={systemConfig?.bedrock_region ?? ''}
+            onChange={(event) =>
+              setSystemConfig((prev) =>
+                prev ? { ...prev, bedrock_region: event.target.value } : prev
+              )
+            }
+            placeholder="us-east-1"
+          />
+          <div className="spacer" />
+          <label className="subtle">Review Inline (no worker queue)</label>
+          <input
+            type="checkbox"
+            checked={Boolean(systemConfig?.review_inline)}
+            onChange={(event) =>
+              setSystemConfig((prev) =>
+                prev ? { ...prev, review_inline: event.target.checked } : prev
+              )
+            }
+          />
+          <div className="spacer" />
+          <button className="primary-button" type="button" onClick={() => void handleSystemConfigSave()}>
+            Save Backend Settings
+          </button>
+          <div className="spacer" />
           <label className="subtle">API Base</label>
           <input
             className="input"
@@ -1291,7 +1450,75 @@ export default function HomePage() {
           />
           <div className="spacer" />
           <button className="primary-button" type="button" onClick={handleTenantSave}>
-            Save
+            Save Connection
+          </button>
+          <div className="spacer" />
+          <label className="subtle">OpenAI API Key</label>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => {
+              const value = window.prompt(
+                `OpenAI API key (${systemConfig?.openai_api_key_set ? 'set' : 'not set'})`,
+                ''
+              );
+              if (value !== null) {
+                void handleSaveSecret('openai_api_key', value);
+              }
+            }}
+          >
+            {systemConfig?.openai_api_key_set ? 'Update OpenAI Key' : 'Set OpenAI Key'}
+          </button>
+          <div className="spacer" />
+          <label className="subtle">Bedrock Access Key ID</label>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => {
+              const value = window.prompt(
+                `Bedrock access key (${systemConfig?.bedrock_access_key_set ? 'set' : 'not set'})`,
+                ''
+              );
+              if (value !== null) {
+                void handleSaveSecret('bedrock_aws_access_key_id', value);
+              }
+            }}
+          >
+            {systemConfig?.bedrock_access_key_set ? 'Update Access Key' : 'Set Access Key'}
+          </button>
+          <div className="spacer" />
+          <label className="subtle">Bedrock Secret Access Key</label>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => {
+              const value = window.prompt(
+                `Bedrock secret key (${systemConfig?.bedrock_secret_key_set ? 'set' : 'not set'})`,
+                ''
+              );
+              if (value !== null) {
+                void handleSaveSecret('bedrock_aws_secret_access_key', value);
+              }
+            }}
+          >
+            {systemConfig?.bedrock_secret_key_set ? 'Update Secret Key' : 'Set Secret Key'}
+          </button>
+          <div className="spacer" />
+          <label className="subtle">Bedrock Session Token</label>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => {
+              const value = window.prompt(
+                `Bedrock session token (${systemConfig?.bedrock_session_token_set ? 'set' : 'not set'})`,
+                ''
+              );
+              if (value !== null) {
+                void handleSaveSecret('bedrock_aws_session_token', value);
+              }
+            }}
+          >
+            {systemConfig?.bedrock_session_token_set ? 'Update Session Token' : 'Set Session Token'}
           </button>
         </div>
       )}

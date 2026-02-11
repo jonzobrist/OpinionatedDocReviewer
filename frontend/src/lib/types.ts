@@ -47,6 +47,21 @@ export type SystemStatus = {
   doc_repo_enabled: boolean;
 };
 
+export type SystemConfigRead = {
+  llm_provider: 'openai' | 'bedrock';
+  openai_model: string;
+  openai_max_tokens: number;
+  openai_temperature: number;
+  openai_timeout_seconds: number;
+  bedrock_model_id: string;
+  bedrock_region: string;
+  review_inline: boolean;
+  openai_api_key_set: boolean;
+  bedrock_access_key_set: boolean;
+  bedrock_secret_key_set: boolean;
+  bedrock_session_token_set: boolean;
+};
+
 export type PersonaRead = {
   id: number;
   tenant_id: string;

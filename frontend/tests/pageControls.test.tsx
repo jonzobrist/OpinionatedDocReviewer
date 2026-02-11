@@ -45,6 +45,39 @@ describe('page controls', () => {
           doc_repo_enabled: true
         });
       }
+      if (url.endsWith('/settings') && (!init || init.method === 'GET')) {
+        return json({
+          llm_provider: 'openai',
+          openai_model: 'gpt-4o-mini',
+          openai_max_tokens: 700,
+          openai_temperature: 0.2,
+          openai_timeout_seconds: 30,
+          bedrock_model_id: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+          bedrock_region: 'us-east-1',
+          review_inline: false,
+          openai_api_key_set: false,
+          bedrock_access_key_set: false,
+          bedrock_secret_key_set: false,
+          bedrock_session_token_set: false
+        });
+      }
+      if (url.endsWith('/settings') && init?.method === 'PUT') {
+        const body = JSON.parse(String(init.body || '{}'));
+        return json({
+          llm_provider: body.llm_provider ?? 'openai',
+          openai_model: body.openai_model ?? 'gpt-4o-mini',
+          openai_max_tokens: body.openai_max_tokens ?? 700,
+          openai_temperature: body.openai_temperature ?? 0.2,
+          openai_timeout_seconds: body.openai_timeout_seconds ?? 30,
+          bedrock_model_id: body.bedrock_model_id ?? 'anthropic.claude-3-5-haiku-20241022-v1:0',
+          bedrock_region: body.bedrock_region ?? 'us-east-1',
+          review_inline: body.review_inline ?? false,
+          openai_api_key_set: false,
+          bedrock_access_key_set: false,
+          bedrock_secret_key_set: false,
+          bedrock_session_token_set: false
+        });
+      }
       if (url.endsWith('/health')) return json({ status: 'ok' });
       if (init?.method === 'POST' || init?.method === 'PATCH' || init?.method === 'DELETE') {
         return json({}, 204);
@@ -73,7 +106,7 @@ describe('page controls', () => {
 
     fireEvent.change(apiInput, { target: { value: 'https://opinion.zlyxy.me/api' } });
     fireEvent.change(tenantInput, { target: { value: 'beta-tenant' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Connection' }));
 
     await waitFor(() => {
       expect(window.localStorage.getItem('odr_api_base')).toBe('https://opinion.zlyxy.me/api');

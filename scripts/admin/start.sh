@@ -6,6 +6,40 @@ SERVICE="${1:-all}"
 source "$(dirname "$0")/_common.sh"
 ensure_dirs
 
+wait_for_port() {
+  local port="$1"
+  local pid_file="$2"
+  local name="$3"
+  local timeout_s="${4:-20}"
+  local waited=0
+  while [ "$waited" -lt "$timeout_s" ]; do
+    if is_port_in_use "$port"; then
+      return 0
+    fi
+    if [ -f "$pid_file" ]; then
+      local pid
+      pid=$(cat "$pid_file")
+      if [ -n "$pid" ] && ! is_pid_running "$pid"; then
+        echo "$name exited before binding to port $port."
+        return 1
+      fi
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
+capture_listener_pid() {
+  local port="$1"
+  local pid_file="$2"
+  local pid
+  pid=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -n1 || true)
+  if [ -n "$pid" ]; then
+    echo "$pid" > "$pid_file"
+  fi
+}
+
 start_detached() {
   local workdir="$1"
   local pid_file="$2"
@@ -53,11 +87,12 @@ start_backend() {
       env UV_CACHE_DIR="$UV_CACHE_DIR" uv run uvicorn app.main:app --host 0.0.0.0 --port "$PORT"
   fi
 
-  sleep 1
-  if ! is_port_in_use "$PORT"; then
-    echo "Backend failed to start. Check $LOG_DIR/backend.log"
+  if ! wait_for_port "$PORT" "$backend_pid_file" "Backend" 25; then
+    echo "Backend failed to start within timeout. Check $LOG_DIR/backend.log"
+    tail -n 40 "$LOG_DIR/backend.log" || true
     return 1
   fi
+  capture_listener_pid "$PORT" "$backend_pid_file"
 }
 
 start_frontend() {
@@ -88,11 +123,12 @@ start_frontend() {
   start_detached "$FRONTEND_DIR" "$frontend_pid_file" "$LOG_DIR/frontend.log" \
     env PORT="$FRONTEND_PORT" UV_CACHE_DIR="$UV_CACHE_DIR" bun run dev
 
-  sleep 1
-  if ! is_port_in_use "$FRONTEND_PORT"; then
-    echo "Frontend failed to start. Check $LOG_DIR/frontend.log"
+  if ! wait_for_port "$FRONTEND_PORT" "$frontend_pid_file" "Frontend" 25; then
+    echo "Frontend failed to start within timeout. Check $LOG_DIR/frontend.log"
+    tail -n 40 "$LOG_DIR/frontend.log" || true
     return 1
   fi
+  capture_listener_pid "$FRONTEND_PORT" "$frontend_pid_file"
 }
 
 start_worker() {
