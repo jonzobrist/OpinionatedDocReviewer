@@ -48,6 +48,23 @@ Useful scripts:
 - Frontend: `http://localhost:3000`
 - Backend API: `http://localhost:8006/api`
 
+## UI Routes
+
+The app now uses path-based navigation. Refresh keeps you on the same page:
+
+- Home: `/`
+- Library: `/library`
+- Agents: `/agents`
+- History: `/history`
+- System: `/system`
+
+Home supports deep links to a document:
+
+- `/?doc=<document_id>`: open that document on load
+- `/?doc=<document_id>&run=1`: open and start a review run once, then normalize URL back to `/?doc=<document_id>`
+
+Top-left brand icon always navigates back to home (`/`).
+
 ## Testing
 
 Backend:

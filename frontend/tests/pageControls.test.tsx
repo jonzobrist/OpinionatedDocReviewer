@@ -11,7 +11,8 @@ const pushMock = vi.fn((next: string) => {
 
 vi.mock('next/navigation', () => ({
   usePathname: () => mockPathname,
-  useRouter: () => ({ push: pushMock })
+  useRouter: () => ({ push: pushMock, replace: vi.fn() }),
+  useSearchParams: () => ({ get: () => null })
 }));
 
 import HomePage from '../app/page';

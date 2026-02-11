@@ -13,7 +13,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import JSZip from 'jszip';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   apiFetch,
   DEFAULT_TENANT,
@@ -142,8 +142,10 @@ export default function HomePage() {
   const markRefs = useRef<Record<number, HTMLElement | null>>({});
   const cardRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const hoveredCommentIdRef = useRef<number | null>(null);
+  const handledRouteIntentRef = useRef<string | null>(null);
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const normalizedPath = (pathname || '/').toLowerCase();
   const showLibrary = normalizedPath === '/library';
   const showAgents = normalizedPath === '/agents';
@@ -279,7 +281,7 @@ export default function HomePage() {
     }
   }
 
-  async function loadVersions(documentId: number) {
+  async function loadVersions(documentId: number): Promise<DocumentVersionRead[]> {
     setErrorMessage(null);
     try {
       const data = await apiFetch<DocumentVersionRead[]>(`/documents/${documentId}/versions`);
@@ -294,8 +296,10 @@ export default function HomePage() {
         setReviewJobs([]);
         setSelectedReviewJobId(null);
       }
+      return data;
     } catch (error) {
       setErrorMessage(normalizeError(error));
+      return [];
     }
   }
 
@@ -605,11 +609,13 @@ export default function HomePage() {
     void refreshAll();
   }
 
-  async function handleOpenDocument(documentId: number) {
+  async function handleOpenDocument(documentId: number, options?: { navigateHome?: boolean }) {
     setErrorMessage(null);
     setSelectedDocumentId(documentId);
     await loadVersions(documentId);
-    router.push('/');
+    if (options?.navigateHome ?? false) {
+      router.push(`/?doc=${documentId}`);
+    }
     setStatusMessage('Loaded saved review for selected document.');
   }
 
@@ -1023,6 +1029,28 @@ export default function HomePage() {
       setHoveredCommentId(nextId);
     }
   }
+
+  useEffect(() => {
+    if (normalizedPath !== '/') return;
+    const docRaw = searchParams.get('doc');
+    if (!docRaw) return;
+    const docId = Number(docRaw);
+    if (!Number.isFinite(docId) || docId <= 0) return;
+    const runRequested = searchParams.get('run') === '1';
+    const intentKey = `${docId}:${runRequested ? 'run' : 'open'}`;
+    if (handledRouteIntentRef.current === intentKey) return;
+    handledRouteIntentRef.current = intentKey;
+
+    void (async () => {
+      const versionsForDoc = await loadVersions(docId);
+      setSelectedDocumentId(docId);
+      if (runRequested && versionsForDoc.length > 0) {
+        const latest = versionsForDoc[versionsForDoc.length - 1];
+        await handleRunReview(latest.id, { requireConfirm: false });
+        router.replace(`/?doc=${docId}`);
+      }
+    })();
+  }, [normalizedPath, searchParams]);
 
   function navigatePanel(path: '/library' | '/agents' | '/history' | '/system') {
     if (normalizedPath === path) {
@@ -1761,7 +1789,7 @@ export default function HomePage() {
                           className="ghost-button"
                           type="button"
                           onClick={() => {
-                            void handleOpenDocument(entry.id);
+                            router.push(`/?doc=${entry.id}`);
                           }}
                         >
                           Open
@@ -1772,13 +1800,7 @@ export default function HomePage() {
                             disabled={!entry.latest_version_id}
                             onClick={() => {
                               if (!entry.latest_version_id) return;
-                              setSelectedDocumentId(entry.id);
-                              router.push('/');
-                              void loadVersions(entry.id).then(() =>
-                                handleRunReview(entry.latest_version_id as number, {
-                                  requireConfirm: false
-                                })
-                              );
+                              router.push(`/?doc=${entry.id}&run=1`);
                             }}
                           >
                             Run Review
@@ -1789,13 +1811,11 @@ export default function HomePage() {
                             disabled={!entry.latest_version_id}
                             onClick={() => {
                               if (!entry.latest_version_id) return;
-                              setSelectedDocumentId(entry.id);
-                              router.push('/');
-                              void loadVersions(entry.id).then(() =>
-                                handleRunReview(entry.latest_version_id as number, {
-                                  requireConfirm: true
-                                })
+                              const confirmed = window.confirm(
+                                `Start a new review run for "${entry.title}"?`
                               );
+                              if (!confirmed) return;
+                              router.push(`/?doc=${entry.id}&run=1`);
                             }}
                           >
                             Re-run
