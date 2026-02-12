@@ -241,6 +241,14 @@ function HomePageContent() {
   }, [showSettings]);
 
   useEffect(() => {
+    if (!statusMessage) return;
+    const timer = window.setTimeout(() => {
+      setStatusMessage((current) => (current === statusMessage ? null : current));
+    }, 4500);
+    return () => window.clearTimeout(timer);
+  }, [statusMessage]);
+
+  useEffect(() => {
     const previous = document.body.style.overflow;
     if (showLibrary) {
       document.body.style.overflow = 'hidden';
