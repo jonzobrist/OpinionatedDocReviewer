@@ -41,3 +41,44 @@
 - [x] Persist and reload review results by version
 - [x] Library actions: archive, restore, delete, review, re-review
 - [x] Library bulk actions: archive, restore, delete, re-review
+
+## Agent Functionality Roadmap
+### Phase 1: Data Model + API
+- [x] Extend persona schema with richer config:
+- [x] Add `output_requirements` (markdown template, max bullets, citation/quote rules, severity tags).
+- [x] Add `reference_notes` (long-form context the agent should always consider).
+- [x] Add `examples` (few-shot example inputs/outputs to shape style).
+- [x] Add `is_default` and `is_system_locked` for persistent built-in agents.
+- [x] Add `sort_order` and `color_theme` so agent display is deterministic and customizable.
+- [x] Add migration path for existing DBs and backfill defaults.
+- [x] Add API validation for required/optional fields and safe limits.
+- [x] Add API route to reset built-in agents to baseline defaults without deleting user agents.
+
+### Phase 2: Review Engine Integration
+- [ ] Update prompt builder to include new persona fields consistently.
+- [ ] Enforce `output_requirements` in prompt and parser fallback behavior.
+- [ ] Persist per-comment metadata indicating which output rule was applied/violated.
+- [ ] Add safety guards for oversized reference notes/examples.
+
+### Phase 3: Full CRUD UI for Agents
+- [ ] Build `/agents` as full management page (not just drawer):
+- [ ] Agent list, search, sort, active toggle.
+- [ ] Create form with advanced sections:
+- [ ] Core identity: name, description, tone.
+- [ ] Prompting: system prompt, focus areas, reference notes.
+- [ ] Output contract: required format, bullet count, mandatory quote/citation options.
+- [ ] Display settings: color theme, icon/label.
+- [ ] Edit + duplicate + delete actions.
+- [ ] Guardrails for system default agents (lock/delete behavior, reset option).
+
+### Phase 4: Defaults + Persistence Behavior
+- [ ] Ensure default agents are always present per tenant.
+- [ ] Prevent accidental deletion of default agents unless explicitly converted to user agent.
+- [ ] Add "Restore defaults" action with preview of what will change.
+
+### Phase 5: Testing + QA
+- [ ] Backend tests for new persona schema and migrations.
+- [ ] Backend tests for prompt assembly with new fields.
+- [ ] Frontend tests for full CRUD flows on `/agents`.
+- [ ] Regression tests ensuring default agents persist across restarts.
+- [ ] E2E smoke test: create custom agent -> run review -> comments reflect new output requirements.

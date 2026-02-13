@@ -6,6 +6,66 @@ from app.db import models
 from sqlalchemy import text
 
 DEFAULT_TENANT = "local-dev"
+DEFAULT_GROUP_NAME = "Default Review"
+
+
+def default_persona_definitions() -> list[dict]:
+    return [
+        {
+            "name": "Clarity Editor",
+            "description": "Improves structure, flow, and readability.",
+            "system_prompt": "Review the document for clarity, structure, and missing context. Provide concise, actionable edits.",
+            "focus_areas": ["structure", "readability", "ambiguity"],
+            "tone": "direct, constructive",
+            "reference_notes": "Prioritize clarity gaps and confusing transitions before style preferences.",
+            "output_requirements": {
+                "format": "bullet_list",
+                "max_bullets": 4,
+                "require_quote_excerpt": True,
+                "require_actionable": True,
+                "include_severity": False,
+            },
+            "examples": [],
+            "sort_order": 10,
+            "color_theme": "#1d8a7a",
+        },
+        {
+            "name": "Risk & Compliance",
+            "description": "Flags risk, security, privacy, and policy issues.",
+            "system_prompt": "Identify risk, compliance, privacy, and security concerns. Note missing approvals or safeguards.",
+            "focus_areas": ["security", "privacy", "compliance", "risk"],
+            "tone": "cautious, precise",
+            "reference_notes": "Call out control gaps and legal/compliance ambiguity with concrete mitigation steps.",
+            "output_requirements": {
+                "format": "bullet_list",
+                "max_bullets": 4,
+                "require_quote_excerpt": True,
+                "require_actionable": True,
+                "include_severity": True,
+            },
+            "examples": [],
+            "sort_order": 20,
+            "color_theme": "#b7482f",
+        },
+        {
+            "name": "Executive Summary",
+            "description": "Highlights key takeaways and action items.",
+            "system_prompt": "Summarize key points, decisions, and action items. Flag gaps in executive-level messaging.",
+            "focus_areas": ["summary", "decision clarity", "action items"],
+            "tone": "succinct, strategic",
+            "reference_notes": "Optimize for fast executive consumption and explicit ownership of next actions.",
+            "output_requirements": {
+                "format": "bullet_list",
+                "max_bullets": 4,
+                "require_quote_excerpt": True,
+                "require_actionable": True,
+                "include_severity": False,
+            },
+            "examples": [],
+            "sort_order": 30,
+            "color_theme": "#2d6eea",
+        },
+    ]
 
 
 def init_db() -> None:
@@ -21,54 +81,87 @@ def seed_default_personas(tenant_id: str, db: Session | None = None) -> None:
     try:
         existing = (
             db.query(models.Persona)
-            .filter(models.Persona.tenant_id == tenant_id)
+            .filter(
+                models.Persona.tenant_id == tenant_id,
+                models.Persona.is_default.is_(True),
+            )
             .count()
         )
         if existing > 0:
             return
-
-        group = models.PersonaGroup(
-            tenant_id=tenant_id,
-            name="Default Review",
-            description="Baseline review personas for quick-start feedback.",
-        )
-        db.add(group)
-        db.flush()
-
-        personas = [
-            models.Persona(
-                tenant_id=tenant_id,
-                name="Clarity Editor",
-                description="Improves structure, flow, and readability.",
-                system_prompt="Review the document for clarity, structure, and missing context. Provide concise, actionable edits.",
-                focus_areas=["structure", "readability", "ambiguity"],
-                tone="direct, constructive",
-                group_id=group.id,
-            ),
-            models.Persona(
-                tenant_id=tenant_id,
-                name="Risk & Compliance",
-                description="Flags risk, security, privacy, and policy issues.",
-                system_prompt="Identify risk, compliance, privacy, and security concerns. Note missing approvals or safeguards.",
-                focus_areas=["security", "privacy", "compliance", "risk"],
-                tone="cautious, precise",
-                group_id=group.id,
-            ),
-            models.Persona(
-                tenant_id=tenant_id,
-                name="Executive Summary",
-                description="Highlights key takeaways and action items.",
-                system_prompt="Summarize key points, decisions, and action items. Flag gaps in executive-level messaging.",
-                focus_areas=["summary", "decision clarity", "action items"],
-                tone="succinct, strategic",
-                group_id=group.id,
-            ),
-        ]
-        db.add_all(personas)
+        upsert_default_personas(tenant_id=tenant_id, db=db)
         db.commit()
     finally:
         if owns_session:
             db.close()
+
+
+def upsert_default_personas(tenant_id: str, db: Session) -> None:
+    group = _ensure_default_group(tenant_id, db)
+    for payload in default_persona_definitions():
+        existing = (
+            db.query(models.Persona)
+            .filter(
+                models.Persona.tenant_id == tenant_id,
+                models.Persona.name == payload["name"],
+                models.Persona.is_default.is_(True),
+            )
+            .first()
+        )
+        if existing:
+            existing.description = payload["description"]
+            existing.system_prompt = payload["system_prompt"]
+            existing.focus_areas = payload["focus_areas"]
+            existing.tone = payload["tone"]
+            existing.reference_notes = payload["reference_notes"]
+            existing.output_requirements = payload["output_requirements"]
+            existing.examples = payload["examples"]
+            existing.sort_order = payload["sort_order"]
+            existing.color_theme = payload["color_theme"]
+            existing.group_id = group.id
+            existing.is_system_locked = True
+            existing.is_default = True
+            continue
+        db.add(
+            models.Persona(
+                tenant_id=tenant_id,
+                name=payload["name"],
+                description=payload["description"],
+                system_prompt=payload["system_prompt"],
+                focus_areas=payload["focus_areas"],
+                tone=payload["tone"],
+                reference_notes=payload["reference_notes"],
+                output_requirements=payload["output_requirements"],
+                examples=payload["examples"],
+                sort_order=payload["sort_order"],
+                color_theme=payload["color_theme"],
+                group_id=group.id,
+                is_default=True,
+                is_system_locked=True,
+                is_active=True,
+            )
+        )
+
+
+def _ensure_default_group(tenant_id: str, db: Session) -> models.PersonaGroup:
+    group = (
+        db.query(models.PersonaGroup)
+        .filter(
+            models.PersonaGroup.tenant_id == tenant_id,
+            models.PersonaGroup.name == DEFAULT_GROUP_NAME,
+        )
+        .first()
+    )
+    if group:
+        return group
+    group = models.PersonaGroup(
+        tenant_id=tenant_id,
+        name=DEFAULT_GROUP_NAME,
+        description="Baseline review personas for quick-start feedback.",
+    )
+    db.add(group)
+    db.flush()
+    return group
 
 
 def _ensure_schema() -> None:
@@ -116,6 +209,13 @@ def _ensure_schema() -> None:
             "archived_at",
             "DATETIME",
         )
+        _ensure_column(connection, "personas", "reference_notes", "TEXT")
+        _ensure_column(connection, "personas", "output_requirements", "JSON")
+        _ensure_column(connection, "personas", "examples", "JSON")
+        _ensure_column(connection, "personas", "is_default", "BOOLEAN DEFAULT 0")
+        _ensure_column(connection, "personas", "is_system_locked", "BOOLEAN DEFAULT 0")
+        _ensure_column(connection, "personas", "sort_order", "INTEGER DEFAULT 100")
+        _ensure_column(connection, "personas", "color_theme", "TEXT")
         connection.execute(
             text("UPDATE review_jobs SET trigger='auto' WHERE trigger IS NULL")
         )
@@ -127,6 +227,21 @@ def _ensure_schema() -> None:
         )
         connection.execute(
             text("UPDATE documents SET is_archived=0 WHERE is_archived IS NULL")
+        )
+        connection.execute(
+            text("UPDATE personas SET output_requirements='{}' WHERE output_requirements IS NULL OR output_requirements=''")
+        )
+        connection.execute(
+            text("UPDATE personas SET examples='[]' WHERE examples IS NULL OR examples=''")
+        )
+        connection.execute(
+            text("UPDATE personas SET is_default=0 WHERE is_default IS NULL")
+        )
+        connection.execute(
+            text("UPDATE personas SET is_system_locked=0 WHERE is_system_locked IS NULL")
+        )
+        connection.execute(
+            text("UPDATE personas SET sort_order=100 WHERE sort_order IS NULL")
         )
         connection.commit()
 

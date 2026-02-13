@@ -18,6 +18,9 @@ def test_persona_crud(client) -> None:
     assert response.status_code == 201
     persona = response.json()
     assert persona["name"] == "Skeptical Architect"
+    assert "output_requirements" in persona
+    assert "reference_notes" in persona
+    assert "examples" in persona
 
     list_response = client.get("/api/personas", headers=headers)
     assert list_response.status_code == 200
@@ -41,3 +44,12 @@ def test_persona_crud(client) -> None:
 
     get_missing = client.get(f"/api/personas/{persona_id}", headers=headers)
     assert get_missing.status_code == 404
+
+
+def test_reset_default_personas(client) -> None:
+    headers = {"X-Tenant-Id": "tenant-defaults"}
+    resp = client.post("/api/personas/reset-defaults", headers=headers)
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert len(payload) >= 3
+    assert any(item.get("is_default") is True for item in payload)

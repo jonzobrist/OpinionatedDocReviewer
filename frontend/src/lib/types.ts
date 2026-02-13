@@ -70,6 +70,19 @@ export type PersonaRead = {
   system_prompt: string;
   focus_areas: string[];
   tone: string | null;
+  reference_notes: string | null;
+  output_requirements: {
+    format: string;
+    max_bullets: number;
+    require_quote_excerpt: boolean;
+    require_actionable: boolean;
+    include_severity: boolean;
+  };
+  examples: string[];
+  is_default: boolean;
+  is_system_locked: boolean;
+  sort_order: number;
+  color_theme: string | null;
   group_id: number | null;
   is_active: boolean;
   created_at: string;

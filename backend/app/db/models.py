@@ -34,6 +34,13 @@ class Persona(Base):
     system_prompt: Mapped[str] = mapped_column(String(4000))
     focus_areas: Mapped[list] = mapped_column(JSON, default=list)
     tone: Mapped[str | None] = mapped_column(String(200), default=None)
+    reference_notes: Mapped[str | None] = mapped_column(Text, default=None)
+    output_requirements: Mapped[dict] = mapped_column(JSON, default=dict)
+    examples: Mapped[list] = mapped_column(JSON, default=list)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_system_locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=100)
+    color_theme: Mapped[str | None] = mapped_column(String(32), default=None)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     group_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("persona_groups.id"))
     created_at: Mapped[datetime] = mapped_column(

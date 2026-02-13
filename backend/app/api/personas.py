@@ -9,6 +9,7 @@ from app.crud.persona import (
     list_personas,
     update_persona,
 )
+from app.db.init_db import upsert_default_personas
 from app.schemas.persona import PersonaCreate, PersonaRead, PersonaUpdate
 
 router = APIRouter(prefix="/personas", tags=["personas"])
@@ -65,3 +66,13 @@ def delete(
     success = delete_persona(db, tenant_id, persona_id)
     if not success:
         raise HTTPException(status_code=404, detail="Persona not found")
+
+
+@router.post("/reset-defaults", response_model=list[PersonaRead])
+def reset_defaults(
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+) -> list[PersonaRead]:
+    upsert_default_personas(tenant_id=tenant_id, db=db)
+    db.commit()
+    return list_personas(db, tenant_id)
