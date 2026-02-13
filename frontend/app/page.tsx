@@ -47,6 +47,24 @@ const AGENT_COLORS = ['#1d8a7a', '#2d6eea', '#b7482f', '#7a4bd3', '#c57a1b', '#0
 
 type DocSegment = { text: string; comment?: CommentRead };
 type ConnectorPath = { id: number; path: string; color: string };
+type AgentDraft = {
+  name: string;
+  description: string;
+  system_prompt: string;
+  focus_areas_text: string;
+  tone: string;
+  reference_notes: string;
+  examples_text: string;
+  output_format: string;
+  max_bullets: number;
+  require_quote_excerpt: boolean;
+  require_actionable: boolean;
+  include_severity: boolean;
+  sort_order: number;
+  color_theme: string;
+  is_active: boolean;
+  group_id: number | null;
+};
 
 function MermaidDiagram({ chart }: { chart: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -135,6 +153,11 @@ function HomePageContent() {
   const [isReviewStarting, setIsReviewStarting] = useState(false);
   const [connectorPaths, setConnectorPaths] = useState<ConnectorPath[]>([]);
   const [highlightTick, setHighlightTick] = useState(0);
+  const [editingPersonaId, setEditingPersonaId] = useState<number | null>(null);
+  const [isCreatingAgent, setIsCreatingAgent] = useState(false);
+  const [agentDraft, setAgentDraft] = useState<AgentDraft>(() => createEmptyAgentDraft());
+  const [isAgentSaving, setIsAgentSaving] = useState(false);
+  const [agentBusyId, setAgentBusyId] = useState<number | null>(null);
   const lastPollRef = useRef<number>(Date.now());
   const commentsRef = useRef<CommentRead[]>([]);
   const commentSignatureRef = useRef('');
@@ -169,6 +192,10 @@ function HomePageContent() {
     () => reviewJobs.find((job) => job.id === selectedReviewJobId) ?? null,
     [reviewJobs, selectedReviewJobId]
   );
+  const editingPersona = useMemo(
+    () => personas.find((persona) => persona.id === editingPersonaId) ?? null,
+    [personas, editingPersonaId]
+  );
 
   useEffect(() => {
     commentsRef.current = comments;
@@ -184,6 +211,23 @@ function HomePageContent() {
   useEffect(() => {
     void refreshAll();
   }, [tenantId]);
+
+  useEffect(() => {
+    if (!showAgents) return;
+    if (personas.length === 0) {
+      setEditingPersonaId(null);
+      setIsCreatingAgent(true);
+      setAgentDraft(createEmptyAgentDraft());
+      return;
+    }
+    if (isCreatingAgent) return;
+    if (editingPersonaId && personas.some((persona) => persona.id === editingPersonaId)) {
+      return;
+    }
+    const first = personas[0];
+    setEditingPersonaId(first.id);
+    setAgentDraft(createDraftFromPersona(first));
+  }, [showAgents, personas, editingPersonaId, isCreatingAgent]);
 
   useEffect(() => {
     if (!selectedVersionId) return;
@@ -268,11 +312,14 @@ function HomePageContent() {
         apiFetch<PersonaRead[]>('/personas'),
         apiFetch<DocumentLibraryEntry[]>('/documents/library')
       ]);
-      setDocuments(docList);
-      setPersonas(personaList);
-      setLibraryEntries(libraryList);
-      if (enabledPersonas.size === 0 && personaList.length > 0) {
-        setEnabledPersonas(new Set(personaList.filter((p) => p.is_active).map((p) => p.id)));
+      const safeDocs = Array.isArray(docList) ? docList : [];
+      const safePersonas = Array.isArray(personaList) ? personaList : [];
+      const safeLibrary = Array.isArray(libraryList) ? libraryList : [];
+      setDocuments(safeDocs);
+      setPersonas(safePersonas);
+      setLibraryEntries(safeLibrary);
+      if (enabledPersonas.size === 0 && safePersonas.length > 0) {
+        setEnabledPersonas(new Set(safePersonas.filter((p) => p.is_active).map((p) => p.id)));
       }
     } catch (error) {
       setErrorMessage(normalizeError(error));
@@ -705,6 +752,150 @@ function HomePageContent() {
       setErrorMessage(normalizeError(error));
     }
   }
+
+  function setPersonaForEditing(persona: PersonaRead) {
+    setIsCreatingAgent(false);
+    setEditingPersonaId(persona.id);
+    setAgentDraft(createDraftFromPersona(persona));
+  }
+
+  function handleCreateAgent() {
+    setIsCreatingAgent(true);
+    setEditingPersonaId(null);
+    setAgentDraft(createEmptyAgentDraft());
+  }
+
+  async function handleSaveAgent() {
+    setErrorMessage(null);
+    if (!agentDraft.name.trim()) {
+      setErrorMessage('Agent name is required.');
+      return;
+    }
+    if (!agentDraft.system_prompt.trim()) {
+      setErrorMessage('System prompt is required.');
+      return;
+    }
+    setIsAgentSaving(true);
+    try {
+      const payload = buildPersonaPayload(agentDraft);
+      const saved = editingPersonaId
+        ? await apiFetch<PersonaRead>(`/personas/${editingPersonaId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload)
+          })
+        : await apiFetch<PersonaRead>('/personas', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          });
+
+      setPersonas((prev) => {
+        const next = editingPersonaId
+          ? prev.map((persona) => (persona.id === saved.id ? saved : persona))
+          : [...prev, saved];
+        return next.slice().sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+      });
+      if (saved.color_theme) {
+        updateAgentTheme(saved.id, saved.color_theme, saved.name);
+      }
+      setIsCreatingAgent(false);
+      setEditingPersonaId(saved.id);
+      setAgentDraft(createDraftFromPersona(saved));
+      setStatusMessage(editingPersonaId ? 'Agent updated.' : 'Agent created.');
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setIsAgentSaving(false);
+    }
+  }
+
+  async function handleDeleteAgent(persona: PersonaRead) {
+    if (persona.is_system_locked) {
+      setErrorMessage('System default agents cannot be deleted.');
+      return;
+    }
+    const confirmed = window.confirm(`Delete agent "${persona.name}"?`);
+    if (!confirmed) return;
+
+    setAgentBusyId(persona.id);
+    setErrorMessage(null);
+    try {
+      await apiFetch<null>(`/personas/${persona.id}`, { method: 'DELETE' });
+      const next = personas.filter((item) => item.id !== persona.id);
+      setPersonas(next);
+      if (editingPersonaId === persona.id) {
+        if (next.length > 0) {
+          setPersonaForEditing(next[0]);
+        } else {
+          setIsCreatingAgent(true);
+          setEditingPersonaId(null);
+          setAgentDraft(createEmptyAgentDraft());
+        }
+      }
+      setStatusMessage('Agent deleted.');
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setAgentBusyId(null);
+    }
+  }
+
+  async function handleResetDefaultAgents() {
+    const confirmed = window.confirm(
+      'Reset system default agents to the latest defaults? Custom agents are preserved.'
+    );
+    if (!confirmed) return;
+    setErrorMessage(null);
+    setIsAgentSaving(true);
+    try {
+      const next = await apiFetch<PersonaRead[]>('/personas/reset-defaults', { method: 'POST' });
+      setPersonas(next);
+      if (next.length > 0) {
+        const stillSelected =
+          editingPersonaId !== null ? next.find((persona) => persona.id === editingPersonaId) : null;
+        if (stillSelected) {
+          setIsCreatingAgent(false);
+          setAgentDraft(createDraftFromPersona(stillSelected));
+        } else {
+          setPersonaForEditing(next[0]);
+        }
+      } else {
+        setIsCreatingAgent(true);
+        setEditingPersonaId(null);
+        setAgentDraft(createEmptyAgentDraft());
+      }
+      setStatusMessage('Default agents reset.');
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setIsAgentSaving(false);
+    }
+  }
+
+  async function handleRevertDefaultAgent(persona: PersonaRead) {
+    setErrorMessage(null);
+    setAgentBusyId(persona.id);
+    try {
+      const reverted = await apiFetch<PersonaRead>(`/personas/${persona.id}/reset-default`, {
+        method: 'POST'
+      });
+      setPersonas((prev) =>
+        prev
+          .map((item) => (item.id === reverted.id ? reverted : item))
+          .slice()
+          .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+      );
+      setPersonaForEditing(reverted);
+      if (reverted.color_theme) {
+        updateAgentTheme(reverted.id, reverted.color_theme, reverted.name);
+      }
+      setStatusMessage(`Reverted "${reverted.name}" to default.`);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setAgentBusyId(null);
+    }
+  }
+
   function togglePersona(id: number) {
     setEnabledPersonas((prev) => {
       const next = new Set(prev);
@@ -1312,7 +1503,7 @@ function HomePageContent() {
         </div>
       )}
 
-      {!selectedVersion && (
+      {!selectedVersion && !showAgents && (
         <section className="hero">
           <div
             className={`hero-drop ${isDragging ? 'drag' : ''}`}
@@ -1890,6 +2081,273 @@ function HomePageContent() {
         </div>
       )}
 
+      {showAgents && (
+        <div className="agents-overlay">
+          <div className="agents-shell">
+            <div className="agents-header">
+              <div>
+                <div className="library-title">Agent Studio</div>
+                <div className="library-sub">
+                  Create and tune reviewer agents. Defaults persist; custom agents are fully editable.
+                </div>
+              </div>
+              <div className="agents-actions">
+                <button className="ghost-button" type="button" onClick={handleCreateAgent}>
+                  New Agent
+                </button>
+                <button className="ghost-button" type="button" onClick={() => void handleResetDefaultAgents()}>
+                  Reset Defaults
+                </button>
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() => void handleSaveAgent()}
+                  disabled={isAgentSaving}
+                >
+                  {isAgentSaving ? 'Saving...' : isCreatingAgent ? 'Create Agent' : 'Save Agent'}
+                </button>
+              </div>
+            </div>
+
+            <div className="agents-workspace">
+              <aside className="agents-list">
+                {personas.length === 0 && <div className="subtle">No agents configured.</div>}
+                {personas
+                  .slice()
+                  .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+                  .map((persona) => {
+                    const color = getThemeForPersona(agentThemes, persona.id, colorForPersona(persona.id));
+                    const selected = persona.id === editingPersonaId;
+                    return (
+                      <button
+                        key={persona.id}
+                        type="button"
+                        className={`agents-list-item ${selected ? 'active' : ''}`}
+                        onClick={() => {
+                          setPersonaForEditing(persona);
+                        }}
+                      >
+                        <div className="agents-list-row">
+                          <span className="agent-dot" style={{ backgroundColor: color }} />
+                          <span className="agents-list-name">{persona.name}</span>
+                          <span className={`status-pill ${persona.is_active ? 'ok' : 'neutral'}`}>
+                            {persona.is_active ? 'Active' : 'Disabled'}
+                          </span>
+                        </div>
+                        <div className="agents-list-row tags">
+                          {persona.is_default && <span className="meta-pill">Default</span>}
+                          {persona.is_system_locked && <span className="meta-pill">Locked</span>}
+                          <span className="meta-pill">Order {persona.sort_order}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+              </aside>
+
+              <section className="agents-editor">
+                <label className="subtle">Name</label>
+                <input
+                  className="input"
+                  placeholder="Reviewer name"
+                  value={agentDraft.name}
+                  onChange={(event) => setAgentDraft((prev) => ({ ...prev, name: event.target.value }))}
+                />
+                <div className="spacer" />
+                <label className="subtle">Description</label>
+                <textarea
+                  className="textarea"
+                  rows={2}
+                  value={agentDraft.description}
+                  onChange={(event) =>
+                    setAgentDraft((prev) => ({ ...prev, description: event.target.value }))
+                  }
+                />
+                <div className="spacer" />
+                <label className="subtle">System Prompt</label>
+                <textarea
+                  className="textarea"
+                  rows={6}
+                  placeholder="How this agent should review and respond..."
+                  value={agentDraft.system_prompt}
+                  onChange={(event) =>
+                    setAgentDraft((prev) => ({ ...prev, system_prompt: event.target.value }))
+                  }
+                />
+                <div className="grid-two">
+                  <div>
+                    <label className="subtle">Focus Areas (one per line)</label>
+                    <textarea
+                      className="textarea"
+                      rows={5}
+                      value={agentDraft.focus_areas_text}
+                      onChange={(event) =>
+                        setAgentDraft((prev) => ({ ...prev, focus_areas_text: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="subtle">Examples (one per line)</label>
+                    <textarea
+                      className="textarea"
+                      rows={5}
+                      value={agentDraft.examples_text}
+                      onChange={(event) =>
+                        setAgentDraft((prev) => ({ ...prev, examples_text: event.target.value }))
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="spacer" />
+                <label className="subtle">Reference Notes</label>
+                <textarea
+                  className="textarea"
+                  rows={4}
+                  value={agentDraft.reference_notes}
+                  onChange={(event) =>
+                    setAgentDraft((prev) => ({ ...prev, reference_notes: event.target.value }))
+                  }
+                />
+                <div className="spacer" />
+                <label className="subtle">Tone</label>
+                <input
+                  className="input"
+                  value={agentDraft.tone}
+                  onChange={(event) => setAgentDraft((prev) => ({ ...prev, tone: event.target.value }))}
+                />
+                <div className="grid-three">
+                  <div>
+                    <label className="subtle">Output Format</label>
+                    <input
+                      className="input"
+                      value={agentDraft.output_format}
+                      onChange={(event) =>
+                        setAgentDraft((prev) => ({ ...prev, output_format: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="subtle">Max Bullets</label>
+                    <input
+                      className="input"
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={agentDraft.max_bullets}
+                      onChange={(event) =>
+                        setAgentDraft((prev) => ({
+                          ...prev,
+                          max_bullets: Math.max(1, Math.min(20, Number(event.target.value) || 1))
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="subtle">Sort Order</label>
+                    <input
+                      className="input"
+                      type="number"
+                      min={0}
+                      value={agentDraft.sort_order}
+                      onChange={(event) =>
+                        setAgentDraft((prev) => ({
+                          ...prev,
+                          sort_order: Math.max(0, Number(event.target.value) || 0)
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="grid-three toggles">
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={agentDraft.require_quote_excerpt}
+                      onChange={(event) =>
+                        setAgentDraft((prev) => ({
+                          ...prev,
+                          require_quote_excerpt: event.target.checked
+                        }))
+                      }
+                    />
+                    Require quote
+                  </label>
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={agentDraft.require_actionable}
+                      onChange={(event) =>
+                        setAgentDraft((prev) => ({
+                          ...prev,
+                          require_actionable: event.target.checked
+                        }))
+                      }
+                    />
+                    Require actionable
+                  </label>
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={agentDraft.include_severity}
+                      onChange={(event) =>
+                        setAgentDraft((prev) => ({ ...prev, include_severity: event.target.checked }))
+                      }
+                    />
+                    Include severity
+                  </label>
+                </div>
+                <div className="grid-three toggles">
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={agentDraft.is_active}
+                      onChange={(event) =>
+                        setAgentDraft((prev) => ({ ...prev, is_active: event.target.checked }))
+                      }
+                    />
+                    Agent active
+                  </label>
+                  <label className="toggle-row">
+                    <span>Theme</span>
+                    <input
+                      className="agent-color"
+                      type="color"
+                      value={agentDraft.color_theme}
+                      onChange={(event) =>
+                        setAgentDraft((prev) => ({ ...prev, color_theme: event.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+                {editingPersona && !editingPersona.is_system_locked && (
+                  <div className="agents-danger">
+                    <button
+                      className="ghost-button danger-button"
+                      type="button"
+                      disabled={agentBusyId === editingPersona.id}
+                      onClick={() => void handleDeleteAgent(editingPersona)}
+                    >
+                      {agentBusyId === editingPersona.id ? 'Deleting...' : 'Delete Agent'}
+                    </button>
+                  </div>
+                )}
+                {editingPersona && editingPersona.is_default && editingPersona.is_system_locked && (
+                  <div className="agents-danger">
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      disabled={agentBusyId === editingPersona.id}
+                      onClick={() => void handleRevertDefaultAgent(editingPersona)}
+                    >
+                      {agentBusyId === editingPersona.id ? 'Reverting...' : 'Revert to Default'}
+                    </button>
+                  </div>
+                )}
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showSettings && (
         <div className="floating-panel">
           <div className="drawer-title">System</div>
@@ -2097,4 +2555,76 @@ function buildCommentSignature(comments: CommentRead[]): string {
         `${comment.id}|${comment.review_job_id}|${comment.start_offset}|${comment.end_offset}|${comment.created_at}|${comment.text}`
     )
     .join('||');
+}
+
+function splitLines(value: string): string[] {
+  return value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function createEmptyAgentDraft(): AgentDraft {
+  return {
+    name: '',
+    description: '',
+    system_prompt: '',
+    focus_areas_text: '',
+    tone: '',
+    reference_notes: '',
+    examples_text: '',
+    output_format: 'bullet_list',
+    max_bullets: 4,
+    require_quote_excerpt: true,
+    require_actionable: true,
+    include_severity: false,
+    sort_order: 100,
+    color_theme: '#2d6eea',
+    is_active: true,
+    group_id: null
+  };
+}
+
+function createDraftFromPersona(persona: PersonaRead): AgentDraft {
+  return {
+    name: persona.name,
+    description: persona.description ?? '',
+    system_prompt: persona.system_prompt,
+    focus_areas_text: persona.focus_areas.join('\n'),
+    tone: persona.tone ?? '',
+    reference_notes: persona.reference_notes ?? '',
+    examples_text: persona.examples.join('\n'),
+    output_format: persona.output_requirements.format,
+    max_bullets: persona.output_requirements.max_bullets,
+    require_quote_excerpt: persona.output_requirements.require_quote_excerpt,
+    require_actionable: persona.output_requirements.require_actionable,
+    include_severity: persona.output_requirements.include_severity,
+    sort_order: persona.sort_order,
+    color_theme: persona.color_theme ?? colorForPersona(persona.id),
+    is_active: persona.is_active,
+    group_id: persona.group_id
+  };
+}
+
+function buildPersonaPayload(draft: AgentDraft) {
+  return {
+    name: draft.name.trim(),
+    description: draft.description.trim() || null,
+    system_prompt: draft.system_prompt.trim(),
+    focus_areas: splitLines(draft.focus_areas_text),
+    tone: draft.tone.trim() || null,
+    reference_notes: draft.reference_notes.trim() || null,
+    output_requirements: {
+      format: draft.output_format.trim() || 'bullet_list',
+      max_bullets: Math.max(1, Math.min(20, draft.max_bullets)),
+      require_quote_excerpt: draft.require_quote_excerpt,
+      require_actionable: draft.require_actionable,
+      include_severity: draft.include_severity
+    },
+    examples: splitLines(draft.examples_text),
+    sort_order: Math.max(0, draft.sort_order),
+    color_theme: draft.color_theme,
+    group_id: draft.group_id,
+    is_active: draft.is_active
+  };
 }

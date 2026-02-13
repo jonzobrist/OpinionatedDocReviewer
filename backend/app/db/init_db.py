@@ -143,6 +143,30 @@ def upsert_default_personas(tenant_id: str, db: Session) -> None:
         )
 
 
+def reset_default_persona(tenant_id: str, persona: models.Persona, db: Session) -> models.Persona:
+    payload = _match_default_persona_definition(persona)
+    if payload is None:
+        return persona
+    group = _ensure_default_group(tenant_id, db)
+    persona.name = payload["name"]
+    persona.description = payload["description"]
+    persona.system_prompt = payload["system_prompt"]
+    persona.focus_areas = payload["focus_areas"]
+    persona.tone = payload["tone"]
+    persona.reference_notes = payload["reference_notes"]
+    persona.output_requirements = payload["output_requirements"]
+    persona.examples = payload["examples"]
+    persona.sort_order = payload["sort_order"]
+    persona.color_theme = payload["color_theme"]
+    persona.group_id = group.id
+    persona.is_default = True
+    persona.is_system_locked = True
+    persona.is_active = True
+    db.commit()
+    db.refresh(persona)
+    return persona
+
+
 def _ensure_default_group(tenant_id: str, db: Session) -> models.PersonaGroup:
     group = (
         db.query(models.PersonaGroup)
@@ -162,6 +186,23 @@ def _ensure_default_group(tenant_id: str, db: Session) -> models.PersonaGroup:
     db.add(group)
     db.flush()
     return group
+
+
+def _match_default_persona_definition(persona: models.Persona) -> dict | None:
+    definitions = default_persona_definitions()
+    if not definitions:
+        return None
+    for payload in definitions:
+        if payload["name"] == persona.name:
+            return payload
+    for payload in definitions:
+        if payload["sort_order"] == persona.sort_order:
+            return payload
+    sorted_defs = sorted(
+        definitions,
+        key=lambda item: abs(int(item.get("sort_order", 0)) - int(persona.sort_order or 0)),
+    )
+    return sorted_defs[0]
 
 
 def _ensure_schema() -> None:

@@ -9,7 +9,7 @@ from app.crud.persona import (
     list_personas,
     update_persona,
 )
-from app.db.init_db import upsert_default_personas
+from app.db.init_db import reset_default_persona, upsert_default_personas
 from app.schemas.persona import PersonaCreate, PersonaRead, PersonaUpdate
 
 router = APIRouter(prefix="/personas", tags=["personas"])
@@ -76,3 +76,20 @@ def reset_defaults(
     upsert_default_personas(tenant_id=tenant_id, db=db)
     db.commit()
     return list_personas(db, tenant_id)
+
+
+@router.post("/{persona_id}/reset-default", response_model=PersonaRead)
+def reset_one_default(
+    persona_id: int,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+) -> PersonaRead:
+    persona = get_persona(db, tenant_id, persona_id)
+    if not persona:
+        raise HTTPException(status_code=404, detail="Persona not found")
+    if not (persona.is_default and persona.is_system_locked):
+        raise HTTPException(
+            status_code=400,
+            detail="Only system default personas can be reverted with this endpoint",
+        )
+    return reset_default_persona(tenant_id=tenant_id, persona=persona, db=db)
