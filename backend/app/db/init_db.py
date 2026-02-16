@@ -72,6 +72,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_schema()
     seed_default_personas(tenant_id=DEFAULT_TENANT)
+    seed_default_admin_user(tenant_id=DEFAULT_TENANT)
 
 
 def seed_default_personas(tenant_id: str, db: Session | None = None) -> None:
@@ -90,6 +91,36 @@ def seed_default_personas(tenant_id: str, db: Session | None = None) -> None:
         if existing > 0:
             return
         upsert_default_personas(tenant_id=tenant_id, db=db)
+        db.commit()
+    finally:
+        if owns_session:
+            db.close()
+
+
+def seed_default_admin_user(tenant_id: str, db: Session | None = None) -> None:
+    owns_session = db is None
+    if db is None:
+        db = SessionLocal()
+    try:
+        existing = (
+            db.query(models.User)
+            .filter(
+                models.User.tenant_id == tenant_id,
+                models.User.role == "admin",
+            )
+            .first()
+        )
+        if existing:
+            return
+        db.add(
+            models.User(
+                tenant_id=tenant_id,
+                name="Local Admin",
+                email=f"admin+{tenant_id}@local",
+                role="admin",
+                is_active=True,
+            )
+        )
         db.commit()
     finally:
         if owns_session:

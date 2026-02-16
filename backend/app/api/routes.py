@@ -6,6 +6,8 @@ from app.api.personas import router as personas_router
 from app.api.review_jobs import router as review_jobs_router
 from app.api.status import router as status_router
 from app.api.settings import router as settings_router
+from app.api.admin import router as admin_router
+from app.api.meta_reviews import router as meta_reviews_router
 
 api_router = APIRouter()
 
@@ -16,6 +18,8 @@ api_router.include_router(comments_router)
 api_router.include_router(review_jobs_router)
 api_router.include_router(status_router)
 api_router.include_router(settings_router)
+api_router.include_router(admin_router)
+api_router.include_router(meta_reviews_router)
 
 @api_router.get("/health")
 def health() -> dict:

@@ -31,6 +31,9 @@ import {
   saveAgentThemes
 } from '../src/lib/agentThemes';
 import {
+  AdminOverview,
+  AdminUserRead,
+  DocumentPermissionRead,
   CommentRead,
   DocumentCommitRead,
   DocumentLibraryEntry,
@@ -38,6 +41,7 @@ import {
   DocumentVersionRead,
   PersonaRead,
   ReviewJobRead,
+  MetaReviewRunRead,
   SystemConfigRead,
   SystemStatus
 } from '../src/lib/types';
@@ -125,11 +129,25 @@ function HomePageContent() {
   const [history, setHistory] = useState<DocumentCommitRead[]>([]);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [systemConfig, setSystemConfig] = useState<SystemConfigRead | null>(null);
+  const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null);
+  const [adminUsers, setAdminUsers] = useState<AdminUserRead[]>([]);
+  const [adminPermissions, setAdminPermissions] = useState<DocumentPermissionRead[]>([]);
+  const [selectedPermissionDocumentId, setSelectedPermissionDocumentId] = useState<number | null>(null);
+  const [newAdminUser, setNewAdminUser] = useState({
+    name: '',
+    email: '',
+    role: 'default' as 'admin' | 'default'
+  });
+  const [newPermission, setNewPermission] = useState({
+    user_id: 0,
+    permission_level: 'viewer' as 'owner' | 'editor' | 'viewer'
+  });
 
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [selectedReviewJobId, setSelectedReviewJobId] = useState<number | null>(null);
   const [docMode, setDocMode] = useState<'view' | 'source'>('view');
+  const [commentViewMode, setCommentViewMode] = useState<'individual' | 'meta'>('individual');
   const [focusedCommentId, setFocusedCommentId] = useState<number | null>(null);
   const [hoveredCommentId, setHoveredCommentId] = useState<number | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -139,6 +157,11 @@ function HomePageContent() {
   const [enabledPersonas, setEnabledPersonas] = useState<Set<number>>(new Set());
   const [recentCommentIds, setRecentCommentIds] = useState<Set<number>>(new Set());
   const [agentThemes, setAgentThemes] = useState<Record<string, AgentTheme>>({});
+  const [metaReviewRun, setMetaReviewRun] = useState<MetaReviewRunRead | null>(null);
+  const [isMetaLoading, setIsMetaLoading] = useState(false);
+  const [metaCategoryFilter, setMetaCategoryFilter] = useState<
+    'all' | 'structure' | 'clarity' | 'technical' | 'security' | 'accessibility' | 'style'
+  >('all');
   const [libraryFilter, setLibraryFilter] = useState<
     'all' | 'needs' | 'reviewed' | 'archived'
   >('all');
@@ -177,6 +200,7 @@ function HomePageContent() {
   const showAgents = normalizedPath === '/agents';
   const showHistory = normalizedPath === '/history';
   const showSettings = normalizedPath === '/system';
+  const showAdmin = normalizedPath === '/admin';
 
   const selectedDocument = useMemo(() => {
     const fromLibrary = libraryEntries.find((doc) => doc.id === selectedDocumentId);
@@ -246,6 +270,18 @@ function HomePageContent() {
   }, [selectedVersionId, selectedReviewJobId]);
 
   useEffect(() => {
+    setMetaReviewRun(null);
+    setCommentViewMode('individual');
+    setMetaCategoryFilter('all');
+  }, [selectedVersionId, selectedReviewJobId]);
+
+  useEffect(() => {
+    if (commentViewMode !== 'meta') return;
+    if (!selectedVersionId) return;
+    void loadOrCreateMetaReview(selectedVersionId, selectedReviewJobId, false);
+  }, [commentViewMode, selectedVersionId, selectedReviewJobId]);
+
+  useEffect(() => {
     if (!focusedCommentId) return;
     const card = cardRefs.current[focusedCommentId];
     const mark = markRefs.current[focusedCommentId];
@@ -283,6 +319,18 @@ function HomePageContent() {
       void loadSystemConfig();
     }
   }, [showSettings]);
+
+  useEffect(() => {
+    if (showAdmin) {
+      void refreshAdminData();
+    }
+  }, [showAdmin]);
+
+  useEffect(() => {
+    if (!showAdmin) return;
+    if (!selectedPermissionDocumentId) return;
+    void loadAdminPermissions(selectedPermissionDocumentId);
+  }, [showAdmin, selectedPermissionDocumentId]);
 
   useEffect(() => {
     if (!statusMessage) return;
@@ -342,6 +390,46 @@ function HomePageContent() {
     } catch (error) {
       setErrorMessage(normalizeError(error));
     }
+  }
+
+  async function loadAdminOverview() {
+    try {
+      const data = await apiFetch<AdminOverview>('/admin/overview');
+      setAdminOverview(data);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
+  }
+
+  async function loadAdminUsers() {
+    try {
+      const users = await apiFetch<AdminUserRead[]>('/admin/users');
+      const safeUsers = Array.isArray(users) ? users : [];
+      setAdminUsers(safeUsers);
+      if (safeUsers.length > 0 && newPermission.user_id === 0) {
+        setNewPermission((prev) => ({ ...prev, user_id: safeUsers[0].id }));
+      }
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
+  }
+
+  async function loadAdminPermissions(documentId?: number | null) {
+    try {
+      const query = documentId ? `?document_id=${documentId}` : '';
+      const permissions = await apiFetch<DocumentPermissionRead[]>(`/admin/permissions${query}`);
+      setAdminPermissions(Array.isArray(permissions) ? permissions : []);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
+  }
+
+  async function refreshAdminData(documentId?: number | null) {
+    await Promise.all([
+      loadAdminOverview(),
+      loadAdminUsers(),
+      loadAdminPermissions(documentId ?? selectedPermissionDocumentId)
+    ]);
   }
 
   async function loadVersions(documentId: number): Promise<DocumentVersionRead[]> {
@@ -452,6 +540,46 @@ function HomePageContent() {
     } catch (error) {
       setErrorMessage(normalizeError(error));
       return [];
+    }
+  }
+
+  async function loadOrCreateMetaReview(
+    versionId: number,
+    reviewJobId?: number | null,
+    force = false
+  ) {
+    setIsMetaLoading(true);
+    try {
+      if (!force) {
+        const query = reviewJobId
+          ? `/meta-reviews/latest?document_version_id=${versionId}&review_job_id=${reviewJobId}`
+          : `/meta-reviews/latest?document_version_id=${versionId}`;
+        try {
+          const latest = await apiFetch<MetaReviewRunRead>(query);
+          setMetaReviewRun(latest);
+          return latest;
+        } catch (error) {
+          const message = normalizeError(error);
+          if (!message.includes('404')) {
+            throw error;
+          }
+        }
+      }
+      const created = await apiFetch<MetaReviewRunRead>('/meta-reviews', {
+        method: 'POST',
+        body: JSON.stringify({
+          document_version_id: versionId,
+          review_job_id: reviewJobId ?? null,
+          force
+        })
+      });
+      setMetaReviewRun(created);
+      return created;
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+      return null;
+    } finally {
+      setIsMetaLoading(false);
     }
   }
 
@@ -695,6 +823,101 @@ function HomePageContent() {
     void refreshAll();
   }
 
+  async function handleCreateAdminUser() {
+    if (!newAdminUser.name.trim() || !newAdminUser.email.trim()) {
+      setErrorMessage('User name and email are required.');
+      return;
+    }
+    try {
+      await apiFetch<AdminUserRead>('/admin/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: newAdminUser.name.trim(),
+          email: newAdminUser.email.trim(),
+          role: newAdminUser.role,
+          is_active: true
+        })
+      });
+      setNewAdminUser({ name: '', email: '', role: 'default' });
+      setStatusMessage('User created.');
+      await refreshAdminData();
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
+  }
+
+  async function handleUpdateAdminUser(
+    userId: number,
+    patch: Partial<{ role: 'admin' | 'default'; is_active: boolean }>
+  ) {
+    try {
+      await apiFetch<AdminUserRead>(`/admin/users/${userId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch)
+      });
+      await refreshAdminData();
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
+  }
+
+  async function handleDeleteAdminUser(userId: number) {
+    const confirmed = window.confirm('Delete this user and all document permissions?');
+    if (!confirmed) return;
+    try {
+      await apiFetch<null>(`/admin/users/${userId}`, { method: 'DELETE' });
+      setStatusMessage('User deleted.');
+      await refreshAdminData();
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
+  }
+
+  async function handleCreatePermission() {
+    if (!selectedPermissionDocumentId || newPermission.user_id <= 0) {
+      setErrorMessage('Select a document and user before adding permission.');
+      return;
+    }
+    try {
+      await apiFetch<DocumentPermissionRead>('/admin/permissions', {
+        method: 'POST',
+        body: JSON.stringify({
+          document_id: selectedPermissionDocumentId,
+          user_id: newPermission.user_id,
+          permission_level: newPermission.permission_level
+        })
+      });
+      setStatusMessage('Permission upserted.');
+      await refreshAdminData(selectedPermissionDocumentId);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
+  }
+
+  async function handleUpdatePermission(
+    permissionId: number,
+    permission_level: 'owner' | 'editor' | 'viewer'
+  ) {
+    try {
+      await apiFetch<DocumentPermissionRead>(`/admin/permissions/${permissionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ permission_level })
+      });
+      await refreshAdminData(selectedPermissionDocumentId);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
+  }
+
+  async function handleDeletePermission(permissionId: number) {
+    try {
+      await apiFetch<null>(`/admin/permissions/${permissionId}`, { method: 'DELETE' });
+      await refreshAdminData(selectedPermissionDocumentId);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
+  }
+
   async function handleSystemConfigSave() {
     if (!systemConfig) return;
     try {
@@ -706,7 +929,17 @@ function HomePageContent() {
         openai_timeout_seconds: systemConfig.openai_timeout_seconds,
         bedrock_model_id: systemConfig.bedrock_model_id,
         bedrock_region: systemConfig.bedrock_region,
-        review_inline: systemConfig.review_inline
+        review_inline: systemConfig.review_inline,
+        redis_url: systemConfig.redis_url,
+        review_queue_name: systemConfig.review_queue_name,
+        doc_repo_enabled: systemConfig.doc_repo_enabled,
+        doc_repo_root: systemConfig.doc_repo_root,
+        cors_allow_origins: systemConfig.cors_allow_origins,
+        cors_allow_origin_regex: systemConfig.cors_allow_origin_regex,
+        cors_allow_credentials: systemConfig.cors_allow_credentials,
+        cors_allow_methods: systemConfig.cors_allow_methods,
+        cors_allow_headers: systemConfig.cors_allow_headers,
+        cors_max_age: systemConfig.cors_max_age
       };
       const next = await apiFetch<SystemConfigRead>('/settings', {
         method: 'PUT',
@@ -739,6 +972,16 @@ function HomePageContent() {
         bedrock_model_id: systemConfig.bedrock_model_id,
         bedrock_region: systemConfig.bedrock_region,
         review_inline: systemConfig.review_inline,
+        redis_url: systemConfig.redis_url,
+        review_queue_name: systemConfig.review_queue_name,
+        doc_repo_enabled: systemConfig.doc_repo_enabled,
+        doc_repo_root: systemConfig.doc_repo_root,
+        cors_allow_origins: systemConfig.cors_allow_origins,
+        cors_allow_origin_regex: systemConfig.cors_allow_origin_regex,
+        cors_allow_credentials: systemConfig.cors_allow_credentials,
+        cors_allow_methods: systemConfig.cors_allow_methods,
+        cors_allow_headers: systemConfig.cors_allow_headers,
+        cors_max_age: systemConfig.cors_max_age,
         [field]: value
       };
       const next = await apiFetch<SystemConfigRead>('/settings', {
@@ -965,6 +1208,28 @@ function HomePageContent() {
     const query = librarySearch.trim().toLowerCase();
     return filteredLibrary.filter((entry) => entry.title.toLowerCase().includes(query));
   }, [filteredLibrary, librarySearch]);
+
+  const filteredMetaComments = useMemo(() => {
+    const comments = metaReviewRun?.comments ?? [];
+    const subset =
+      metaCategoryFilter === 'all'
+        ? comments
+        : comments.filter((comment) => comment.category === metaCategoryFilter);
+    const priorityRank: Record<string, number> = {
+      critical: 4,
+      high: 3,
+      medium: 2,
+      low: 1
+    };
+    return subset
+      .slice()
+      .sort((a, b) => {
+        if (a.start_offset !== b.start_offset) return a.start_offset - b.start_offset;
+        const rankDelta = (priorityRank[b.priority] ?? 0) - (priorityRank[a.priority] ?? 0);
+        if (rankDelta !== 0) return rankDelta;
+        return a.order_index - b.order_index;
+      });
+  }, [metaReviewRun, metaCategoryFilter]);
 
   const activeCommentId = focusedCommentId ?? hoveredCommentId;
 
@@ -1293,7 +1558,7 @@ function HomePageContent() {
     })();
   }, [normalizedPath, searchParams]);
 
-  function navigatePanel(path: '/library' | '/agents' | '/history' | '/system') {
+  function navigatePanel(path: '/library' | '/agents' | '/history' | '/system' | '/admin') {
     if (normalizedPath === path) {
       router.push('/');
       return;
@@ -1479,6 +1744,9 @@ function HomePageContent() {
           <button className="ghost-button" type="button" onClick={() => navigatePanel('/system')}>
             System
           </button>
+          <button className="ghost-button" type="button" onClick={() => navigatePanel('/admin')}>
+            Admin
+          </button>
         </div>
       </div>
 
@@ -1503,7 +1771,7 @@ function HomePageContent() {
         </div>
       )}
 
-      {!selectedVersion && !showAgents && (
+      {!selectedVersion && !showAgents && !showSettings && !showAdmin && (
         <section className="hero">
           <div
             className={`hero-drop ${isDragging ? 'drag' : ''}`}
@@ -1694,15 +1962,76 @@ function HomePageContent() {
             <div className="feed-header">
               <div>
                 <div className="feed-title">Comments</div>
-                <div className="feed-sub">Anchored reviewer comments for this document version.</div>
+                <div className="feed-sub">
+                  {commentViewMode === 'meta'
+                    ? 'Meta-synthesized directives with source attribution.'
+                    : 'Anchored reviewer comments for this document version.'}
+                </div>
               </div>
-              <button
-                className="ghost-button"
-                type="button"
-                onClick={() => void loadComments(selectedVersion.id, false, selectedReviewJobId)}
-              >
-                Refresh
-              </button>
+              <div className="feed-controls">
+                <div className="mode-toggle">
+                  <button
+                    className={`mode-button ${commentViewMode === 'individual' ? 'active' : ''}`}
+                    type="button"
+                    onClick={() => setCommentViewMode('individual')}
+                  >
+                    Individual
+                  </button>
+                  <button
+                    className={`mode-button ${commentViewMode === 'meta' ? 'active' : ''}`}
+                    type="button"
+                    onClick={() => setCommentViewMode('meta')}
+                  >
+                    Meta
+                  </button>
+                </div>
+                {commentViewMode === 'meta' && (
+                  <>
+                    <select
+                      className="input compact"
+                      value={metaCategoryFilter}
+                      onChange={(event) =>
+                        setMetaCategoryFilter(
+                          event.target.value as
+                            | 'all'
+                            | 'structure'
+                            | 'clarity'
+                            | 'technical'
+                            | 'security'
+                            | 'accessibility'
+                            | 'style'
+                        )
+                      }
+                    >
+                      <option value="all">all categories</option>
+                      <option value="structure">structure</option>
+                      <option value="clarity">clarity</option>
+                      <option value="technical">technical</option>
+                      <option value="security">security</option>
+                      <option value="accessibility">accessibility</option>
+                      <option value="style">style</option>
+                    </select>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={() =>
+                        void loadOrCreateMetaReview(selectedVersion.id, selectedReviewJobId, true)
+                      }
+                    >
+                      Recompute
+                    </button>
+                  </>
+                )}
+                {commentViewMode === 'individual' && (
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => void loadComments(selectedVersion.id, false, selectedReviewJobId)}
+                  >
+                    Refresh
+                  </button>
+                )}
+              </div>
             </div>
             <div
               className="feed-list"
@@ -1710,10 +2039,11 @@ function HomePageContent() {
               onMouseMove={handleFeedPointerMove}
               onMouseLeave={() => setHoveredCommentId(null)}
             >
-              {visibleComments.length === 0 && (
+              {commentViewMode === 'individual' && visibleComments.length === 0 && (
                 <div className="empty-feed">Waiting for anchored comments…</div>
               )}
-              {visibleComments.map((comment, index) => {
+              {commentViewMode === 'individual' &&
+                visibleComments.map((comment, index) => {
                 const persona = personaMap.get(comment.persona_id);
                 const color = persona
                   ? getThemeForPersona(agentThemes, persona.id, colorForPersona(persona.id))
@@ -1756,10 +2086,73 @@ function HomePageContent() {
                         {new Date(comment.created_at).toLocaleTimeString()}
                       </span>
                     </div>
-                    <div className="comment-text">{comment.text}</div>
+                    <div className="comment-text">{formatCommentBody(comment)}</div>
+                    {comment.excerpt && (
+                      <details className="comment-source">
+                        <summary>Show linked text</summary>
+                        <div>{comment.excerpt}</div>
+                      </details>
+                    )}
                   </div>
                 );
               })}
+              {commentViewMode === 'meta' && isMetaLoading && (
+                <div className="empty-feed">Synthesizing meta comments…</div>
+              )}
+              {commentViewMode === 'meta' &&
+                !isMetaLoading &&
+                filteredMetaComments.length === 0 && (
+                  <div className="empty-feed">No significant issues found.</div>
+                )}
+              {commentViewMode === 'meta' &&
+                !isMetaLoading &&
+                filteredMetaComments.map((metaComment) => {
+                  const topSource = metaComment.sources[0];
+                  const pseudoColor = colorForPriority(metaComment.priority);
+                  return (
+                    <div
+                      key={`meta-${metaComment.id}`}
+                      className={`comment-card meta-card priority-${metaComment.priority}`}
+                      style={{ borderLeftColor: pseudoColor }}
+                      onClick={() => {
+                        if (topSource?.comment_id) {
+                          focusComment(topSource.comment_id);
+                        }
+                      }}
+                    >
+                      <div className="comment-head">
+                        <div className="comment-agent">
+                          <span className="agent-dot" style={{ backgroundColor: pseudoColor }} />
+                          Meta Reviewer
+                        </div>
+                        <span className={`priority-pill ${metaComment.priority}`}>
+                          {metaComment.priority}
+                        </span>
+                      </div>
+                      <div className="meta-tags">
+                        <span className="meta-pill">{metaComment.category}</span>
+                        <span className="meta-pill">
+                          {metaComment.start_offset}-{metaComment.end_offset}
+                        </span>
+                        {!metaReviewRun?.is_synthesized && <span className="meta-pill">fallback</span>}
+                      </div>
+                      <div className="comment-text">{metaComment.content}</div>
+                      <details className="comment-source">
+                        <summary>Show sources ({metaComment.sources.length})</summary>
+                        <div className="meta-sources">
+                          {metaComment.sources.map((source) => (
+                            <div key={source.id} className="meta-source-item">
+                              <div className="meta-source-head">
+                                {source.reviewer_name} · #{source.comment_id}
+                              </div>
+                              <div>{source.original_comment_text}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    </div>
+                  );
+                })}
             </div>
             {showAgents && (
               <div className="drawer">
@@ -2348,180 +2741,653 @@ function HomePageContent() {
         </div>
       )}
 
-      {showSettings && (
-        <div className="floating-panel">
-          <div className="drawer-title">System</div>
-          <label className="subtle">LLM Provider</label>
-          <select
-            className="input"
-            value={systemConfig?.llm_provider ?? 'openai'}
-            onChange={(event) =>
-              setSystemConfig((prev) =>
-                prev
-                  ? { ...prev, llm_provider: event.target.value as 'openai' | 'bedrock' }
-                  : prev
-              )
-            }
-          >
-            <option value="openai">OpenAI</option>
-            <option value="bedrock">AWS Bedrock</option>
-          </select>
-          <div className="spacer" />
-          <label className="subtle">OpenAI Model</label>
-          <input
-            className="input"
-            value={systemConfig?.openai_model ?? ''}
-            onChange={(event) =>
-              setSystemConfig((prev) =>
-                prev ? { ...prev, openai_model: event.target.value } : prev
-              )
-            }
-            placeholder="gpt-4o-mini"
-          />
-          <div className="spacer" />
-          <label className="subtle">OpenAI Max Tokens</label>
-          <input
-            className="input"
-            type="number"
-            value={systemConfig?.openai_max_tokens ?? 700}
-            onChange={(event) =>
-              setSystemConfig((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      openai_max_tokens: Math.max(1, Number(event.target.value) || 1)
+      {showAdmin && (
+        <div className="admin-overlay">
+          <div className="admin-shell">
+            <div className="admin-header">
+              <div>
+                <div className="library-title">Administrator</div>
+                <div className="library-sub">
+                  Repository visibility, user access control, document permissions, and review operations.
+                </div>
+              </div>
+              <button className="ghost-button" type="button" onClick={() => void refreshAdminData()}>
+                Refresh
+              </button>
+            </div>
+
+            <div className="admin-grid">
+              <section className="admin-card">
+                <div className="drawer-title">Repository</div>
+                <div className="admin-kv">Enabled: {adminOverview?.repository.enabled ? 'Yes' : 'No'}</div>
+                <div className="admin-kv">Root: {adminOverview?.repository.root ?? '—'}</div>
+                <div className="admin-kv">Tenant Repo Path: {adminOverview?.repository.tenant_root ?? '—'}</div>
+                <div className="admin-kv">
+                  Repositories: {adminOverview?.repository.repository_count ?? 0}
+                </div>
+              </section>
+
+              <section className="admin-card">
+                <div className="drawer-title">Summary</div>
+                <div className="admin-stats">
+                  <div className="stat">
+                    <div className="stat-label">Users</div>
+                    <div className="stat-value">{adminOverview?.users.total ?? 0}</div>
+                  </div>
+                  <div className="stat">
+                    <div className="stat-label">Admins</div>
+                    <div className="stat-value">{adminOverview?.users.admins ?? 0}</div>
+                  </div>
+                  <div className="stat">
+                    <div className="stat-label">Documents</div>
+                    <div className="stat-value">{adminOverview?.documents.total ?? 0}</div>
+                  </div>
+                  <div className="stat">
+                    <div className="stat-label">In Progress Jobs</div>
+                    <div className="stat-value">{adminOverview?.jobs.in_progress ?? 0}</div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="admin-card wide">
+                <div className="drawer-title">Work In Progress</div>
+                <div className="history-list">
+                  {(adminOverview?.in_progress_jobs ?? []).length === 0 && (
+                    <div className="subtle">No jobs currently running.</div>
+                  )}
+                  {(adminOverview?.in_progress_jobs ?? []).map((job) => (
+                    <div key={job.id} className="history-item">
+                      <div>
+                        <div className="history-msg">
+                          #{job.id} {job.status} · {job.document_title}
+                        </div>
+                        <div className="history-time">
+                          {new Date(job.created_at).toLocaleString()} · {job.provider}/{job.model}
+                        </div>
+                      </div>
+                      <span className="pill">{job.trigger}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="admin-card wide">
+                <div className="drawer-title">Historical Jobs</div>
+                <div className="history-list">
+                  {(adminOverview?.recent_jobs ?? []).length === 0 && (
+                    <div className="subtle">No jobs yet.</div>
+                  )}
+                  {(adminOverview?.recent_jobs ?? []).slice(0, 20).map((job) => (
+                    <div key={job.id} className="history-item">
+                      <div>
+                        <div className="history-msg">
+                          #{job.id} {job.status} · {job.document_title}
+                        </div>
+                        <div className="history-time">
+                          {new Date(job.created_at).toLocaleString()}
+                          {job.completed_at ? ` · completed ${new Date(job.completed_at).toLocaleString()}` : ''}
+                        </div>
+                      </div>
+                      <span className="pill">
+                        {job.provider}/{job.model}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="admin-card">
+                <div className="drawer-title">Users</div>
+                <div className="admin-user-create">
+                  <input
+                    className="input"
+                    placeholder="Name"
+                    value={newAdminUser.name}
+                    onChange={(event) =>
+                      setNewAdminUser((prev) => ({ ...prev, name: event.target.value }))
                     }
-                  : prev
-              )
-            }
-          />
-          <div className="spacer" />
-          <label className="subtle">Bedrock Model ID</label>
-          <input
-            className="input"
-            value={systemConfig?.bedrock_model_id ?? ''}
-            onChange={(event) =>
-              setSystemConfig((prev) =>
-                prev ? { ...prev, bedrock_model_id: event.target.value } : prev
-              )
-            }
-            placeholder="anthropic.claude-3-5-haiku-20241022-v1:0"
-          />
-          <div className="spacer" />
-          <label className="subtle">Bedrock Region</label>
-          <input
-            className="input"
-            value={systemConfig?.bedrock_region ?? ''}
-            onChange={(event) =>
-              setSystemConfig((prev) =>
-                prev ? { ...prev, bedrock_region: event.target.value } : prev
-              )
-            }
-            placeholder="us-east-1"
-          />
-          <div className="spacer" />
-          <label className="subtle">Review Inline (no worker queue)</label>
-          <input
-            type="checkbox"
-            checked={Boolean(systemConfig?.review_inline)}
-            onChange={(event) =>
-              setSystemConfig((prev) =>
-                prev ? { ...prev, review_inline: event.target.checked } : prev
-              )
-            }
-          />
-          <div className="spacer" />
-          <button className="primary-button" type="button" onClick={() => void handleSystemConfigSave()}>
-            Save Backend Settings
-          </button>
-          <div className="spacer" />
-          <label className="subtle">API Base</label>
-          <input
-            className="input"
-            value={apiBase}
-            onChange={(event) => setApiBaseState(event.target.value)}
-            placeholder="http://localhost:8006/api"
-          />
-          <div className="spacer" />
-          <label className="subtle">Tenant ID</label>
-          <input
-            className="input"
-            value={tenantId}
-            onChange={(event) => setTenantIdState(event.target.value)}
-            placeholder={DEFAULT_TENANT}
-          />
-          <div className="spacer" />
-          <button className="primary-button" type="button" onClick={handleTenantSave}>
-            Save Connection
-          </button>
-          <div className="spacer" />
-          <label className="subtle">OpenAI API Key</label>
-          <button
-            className="ghost-button"
-            type="button"
-            onClick={() => {
-              const value = window.prompt(
-                `OpenAI API key (${systemConfig?.openai_api_key_set ? 'set' : 'not set'})`,
-                ''
-              );
-              if (value !== null) {
-                void handleSaveSecret('openai_api_key', value);
-              }
-            }}
-          >
-            {systemConfig?.openai_api_key_set ? 'Update OpenAI Key' : 'Set OpenAI Key'}
-          </button>
-          <div className="spacer" />
-          <label className="subtle">Bedrock Access Key ID</label>
-          <button
-            className="ghost-button"
-            type="button"
-            onClick={() => {
-              const value = window.prompt(
-                `Bedrock access key (${systemConfig?.bedrock_access_key_set ? 'set' : 'not set'})`,
-                ''
-              );
-              if (value !== null) {
-                void handleSaveSecret('bedrock_aws_access_key_id', value);
-              }
-            }}
-          >
-            {systemConfig?.bedrock_access_key_set ? 'Update Access Key' : 'Set Access Key'}
-          </button>
-          <div className="spacer" />
-          <label className="subtle">Bedrock Secret Access Key</label>
-          <button
-            className="ghost-button"
-            type="button"
-            onClick={() => {
-              const value = window.prompt(
-                `Bedrock secret key (${systemConfig?.bedrock_secret_key_set ? 'set' : 'not set'})`,
-                ''
-              );
-              if (value !== null) {
-                void handleSaveSecret('bedrock_aws_secret_access_key', value);
-              }
-            }}
-          >
-            {systemConfig?.bedrock_secret_key_set ? 'Update Secret Key' : 'Set Secret Key'}
-          </button>
-          <div className="spacer" />
-          <label className="subtle">Bedrock Session Token</label>
-          <button
-            className="ghost-button"
-            type="button"
-            onClick={() => {
-              const value = window.prompt(
-                `Bedrock session token (${systemConfig?.bedrock_session_token_set ? 'set' : 'not set'})`,
-                ''
-              );
-              if (value !== null) {
-                void handleSaveSecret('bedrock_aws_session_token', value);
-              }
-            }}
-          >
-            {systemConfig?.bedrock_session_token_set ? 'Update Session Token' : 'Set Session Token'}
-          </button>
+                  />
+                  <input
+                    className="input"
+                    placeholder="Email"
+                    value={newAdminUser.email}
+                    onChange={(event) =>
+                      setNewAdminUser((prev) => ({ ...prev, email: event.target.value }))
+                    }
+                  />
+                  <select
+                    className="input"
+                    value={newAdminUser.role}
+                    onChange={(event) =>
+                      setNewAdminUser((prev) => ({
+                        ...prev,
+                        role: event.target.value as 'admin' | 'default'
+                      }))
+                    }
+                  >
+                    <option value="default">Default</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <button className="primary-button" type="button" onClick={() => void handleCreateAdminUser()}>
+                    Add User
+                  </button>
+                </div>
+                <div className="history-list">
+                  {adminUsers.map((user) => (
+                    <div key={user.id} className="history-item">
+                      <div>
+                        <div className="history-msg">
+                          {user.name} · {user.email}
+                        </div>
+                        <div className="history-time">Created {new Date(user.created_at).toLocaleString()}</div>
+                      </div>
+                      <div className="admin-user-actions">
+                        <select
+                          className="input compact"
+                          value={user.role}
+                          onChange={(event) =>
+                            void handleUpdateAdminUser(user.id, {
+                              role: event.target.value as 'admin' | 'default'
+                            })
+                          }
+                        >
+                          <option value="default">default</option>
+                          <option value="admin">admin</option>
+                        </select>
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          onClick={() =>
+                            void handleUpdateAdminUser(user.id, {
+                              is_active: !user.is_active
+                            })
+                          }
+                        >
+                          {user.is_active ? 'Disable' : 'Enable'}
+                        </button>
+                        <button
+                          className="ghost-button danger-button"
+                          type="button"
+                          onClick={() => void handleDeleteAdminUser(user.id)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="admin-card">
+                <div className="drawer-title">Document Permissions</div>
+                <select
+                  className="input"
+                  value={selectedPermissionDocumentId ?? ''}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    setSelectedPermissionDocumentId(Number.isFinite(value) ? value : null);
+                  }}
+                >
+                  <option value="">Select document</option>
+                  {libraryEntries.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.title}
+                    </option>
+                  ))}
+                </select>
+                <div className="spacer" />
+                <div className="admin-user-create">
+                  <select
+                    className="input"
+                    value={newPermission.user_id}
+                    onChange={(event) =>
+                      setNewPermission((prev) => ({
+                        ...prev,
+                        user_id: Number(event.target.value)
+                      }))
+                    }
+                  >
+                    <option value={0}>Select user</option>
+                    {adminUsers.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.name} ({user.email})
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="input"
+                    value={newPermission.permission_level}
+                    onChange={(event) =>
+                      setNewPermission((prev) => ({
+                        ...prev,
+                        permission_level: event.target.value as 'owner' | 'editor' | 'viewer'
+                      }))
+                    }
+                  >
+                    <option value="viewer">viewer</option>
+                    <option value="editor">editor</option>
+                    <option value="owner">owner</option>
+                  </select>
+                  <button className="primary-button" type="button" onClick={() => void handleCreatePermission()}>
+                    Grant/Update
+                  </button>
+                </div>
+                <div className="history-list">
+                  {adminPermissions.map((perm) => (
+                    <div key={perm.id} className="history-item">
+                      <div>
+                        <div className="history-msg">
+                          {perm.user_name} · {perm.user_email}
+                        </div>
+                        <div className="history-time">Added {new Date(perm.created_at).toLocaleString()}</div>
+                      </div>
+                      <div className="admin-user-actions">
+                        <select
+                          className="input compact"
+                          value={perm.permission_level}
+                          onChange={(event) =>
+                            void handleUpdatePermission(
+                              perm.id,
+                              event.target.value as 'owner' | 'editor' | 'viewer'
+                            )
+                          }
+                        >
+                          <option value="viewer">viewer</option>
+                          <option value="editor">editor</option>
+                          <option value="owner">owner</option>
+                        </select>
+                        <button
+                          className="ghost-button danger-button"
+                          type="button"
+                          onClick={() => void handleDeletePermission(perm.id)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSettings && (
+        <div className="system-overlay">
+          <div className="system-shell">
+            <div className="system-header">
+              <div>
+                <div className="library-title">System Configuration</div>
+                <div className="library-sub">
+                  Manage provider, queue, storage, CORS, and local client connection settings.
+                </div>
+              </div>
+              <div className="system-status-pills">
+                <span className={`status-pill ${systemStatus?.redis.ok ? 'ok' : 'warn'}`}>
+                  Redis {systemStatus?.redis.ok ? 'OK' : 'Down'}
+                </span>
+                <span
+                  className={`status-pill ${
+                    systemStatus && (systemStatus.llm?.ok ?? systemStatus.openai.ok) ? 'ok' : 'warn'
+                  }`}
+                >
+                  LLM {systemStatus && (systemStatus.llm?.ok ?? systemStatus.openai.ok) ? 'OK' : 'Issue'}
+                </span>
+              </div>
+            </div>
+
+            {systemConfig && (
+              <div className="system-grid">
+                <section className="system-card">
+                  <div className="drawer-title">LLM Provider</div>
+                  <label className="subtle">Provider</label>
+                  <select
+                    className="input"
+                    value={systemConfig.llm_provider}
+                    onChange={(event) =>
+                      setSystemConfig((prev) =>
+                        prev
+                          ? { ...prev, llm_provider: event.target.value as 'openai' | 'bedrock' }
+                          : prev
+                      )
+                    }
+                  >
+                    <option value="openai">OpenAI</option>
+                    <option value="bedrock">AWS Bedrock</option>
+                  </select>
+                  <div className="spacer" />
+                  <label className="subtle">OpenAI Model</label>
+                  <input
+                    className="input"
+                    value={systemConfig.openai_model}
+                    onChange={(event) =>
+                      setSystemConfig((prev) =>
+                        prev ? { ...prev, openai_model: event.target.value } : prev
+                      )
+                    }
+                    placeholder="gpt-4o-mini"
+                  />
+                  <div className="grid-two">
+                    <div>
+                      <label className="subtle">Max Tokens</label>
+                      <input
+                        className="input"
+                        type="number"
+                        value={systemConfig.openai_max_tokens}
+                        onChange={(event) =>
+                          setSystemConfig((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  openai_max_tokens: Math.max(1, Number(event.target.value) || 1)
+                                }
+                              : prev
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="subtle">Timeout (sec)</label>
+                      <input
+                        className="input"
+                        type="number"
+                        value={systemConfig.openai_timeout_seconds}
+                        onChange={(event) =>
+                          setSystemConfig((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  openai_timeout_seconds: Math.max(1, Number(event.target.value) || 1)
+                                }
+                              : prev
+                          )
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="spacer" />
+                  <label className="subtle">Bedrock Model ID</label>
+                  <input
+                    className="input"
+                    value={systemConfig.bedrock_model_id}
+                    onChange={(event) =>
+                      setSystemConfig((prev) =>
+                        prev ? { ...prev, bedrock_model_id: event.target.value } : prev
+                      )
+                    }
+                    placeholder="anthropic.claude-3-5-haiku-20241022-v1:0"
+                  />
+                  <div className="spacer" />
+                  <label className="subtle">Bedrock Region</label>
+                  <input
+                    className="input"
+                    value={systemConfig.bedrock_region}
+                    onChange={(event) =>
+                      setSystemConfig((prev) =>
+                        prev ? { ...prev, bedrock_region: event.target.value } : prev
+                      )
+                    }
+                    placeholder="us-east-1"
+                  />
+                  <div className="spacer" />
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={systemConfig.review_inline}
+                      onChange={(event) =>
+                        setSystemConfig((prev) =>
+                          prev ? { ...prev, review_inline: event.target.checked } : prev
+                        )
+                      }
+                    />
+                    Run reviews inline (skip worker queue)
+                  </label>
+                </section>
+
+                <section className="system-card">
+                  <div className="drawer-title">Secrets</div>
+                  <div className="system-secret-row">
+                    <div className="subtle">OpenAI API Key</div>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={() => {
+                        const value = window.prompt(
+                          `OpenAI API key (${systemConfig.openai_api_key_set ? 'set' : 'not set'})`,
+                          ''
+                        );
+                        if (value !== null) {
+                          void handleSaveSecret('openai_api_key', value);
+                        }
+                      }}
+                    >
+                      {systemConfig.openai_api_key_set ? 'Update' : 'Set'}
+                    </button>
+                  </div>
+                  <div className="system-secret-row">
+                    <div className="subtle">Bedrock Access Key ID</div>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={() => {
+                        const value = window.prompt(
+                          `Bedrock access key (${systemConfig.bedrock_access_key_set ? 'set' : 'not set'})`,
+                          ''
+                        );
+                        if (value !== null) {
+                          void handleSaveSecret('bedrock_aws_access_key_id', value);
+                        }
+                      }}
+                    >
+                      {systemConfig.bedrock_access_key_set ? 'Update' : 'Set'}
+                    </button>
+                  </div>
+                  <div className="system-secret-row">
+                    <div className="subtle">Bedrock Secret Access Key</div>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={() => {
+                        const value = window.prompt(
+                          `Bedrock secret key (${systemConfig.bedrock_secret_key_set ? 'set' : 'not set'})`,
+                          ''
+                        );
+                        if (value !== null) {
+                          void handleSaveSecret('bedrock_aws_secret_access_key', value);
+                        }
+                      }}
+                    >
+                      {systemConfig.bedrock_secret_key_set ? 'Update' : 'Set'}
+                    </button>
+                  </div>
+                  <div className="system-secret-row">
+                    <div className="subtle">Bedrock Session Token (optional)</div>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={() => {
+                        const value = window.prompt(
+                          `Bedrock session token (${systemConfig.bedrock_session_token_set ? 'set' : 'not set'})`,
+                          ''
+                        );
+                        if (value !== null) {
+                          void handleSaveSecret('bedrock_aws_session_token', value);
+                        }
+                      }}
+                    >
+                      {systemConfig.bedrock_session_token_set ? 'Update' : 'Set'}
+                    </button>
+                  </div>
+                </section>
+
+                <section className="system-card">
+                  <div className="drawer-title">Queue & Storage</div>
+                  <label className="subtle">Redis URL</label>
+                  <input
+                    className="input"
+                    value={systemConfig.redis_url}
+                    onChange={(event) =>
+                      setSystemConfig((prev) => (prev ? { ...prev, redis_url: event.target.value } : prev))
+                    }
+                  />
+                  <div className="spacer" />
+                  <label className="subtle">Review Queue Name</label>
+                  <input
+                    className="input"
+                    value={systemConfig.review_queue_name}
+                    onChange={(event) =>
+                      setSystemConfig((prev) =>
+                        prev ? { ...prev, review_queue_name: event.target.value } : prev
+                      )
+                    }
+                  />
+                  <div className="spacer" />
+                  <label className="subtle">Document Repo Root</label>
+                  <input
+                    className="input"
+                    value={systemConfig.doc_repo_root}
+                    onChange={(event) =>
+                      setSystemConfig((prev) =>
+                        prev ? { ...prev, doc_repo_root: event.target.value } : prev
+                      )
+                    }
+                  />
+                  <div className="spacer" />
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={systemConfig.doc_repo_enabled}
+                      onChange={(event) =>
+                        setSystemConfig((prev) =>
+                          prev ? { ...prev, doc_repo_enabled: event.target.checked } : prev
+                        )
+                      }
+                    />
+                    Enable document git repository persistence
+                  </label>
+                </section>
+
+                <section className="system-card">
+                  <div className="drawer-title">CORS</div>
+                  <label className="subtle">Allowed Origins (comma separated)</label>
+                  <input
+                    className="input"
+                    value={systemConfig.cors_allow_origins}
+                    onChange={(event) =>
+                      setSystemConfig((prev) =>
+                        prev ? { ...prev, cors_allow_origins: event.target.value } : prev
+                      )
+                    }
+                    placeholder="http://localhost:3000,https://opinion.zlyxy.me"
+                  />
+                  <div className="spacer" />
+                  <label className="subtle">Allowed Origin Regex (optional)</label>
+                  <input
+                    className="input"
+                    value={systemConfig.cors_allow_origin_regex ?? ''}
+                    onChange={(event) =>
+                      setSystemConfig((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              cors_allow_origin_regex: event.target.value.trim() || null
+                            }
+                          : prev
+                      )
+                    }
+                    placeholder="https://.*\\.zlyxy\\.me"
+                  />
+                  <div className="grid-two">
+                    <div>
+                      <label className="subtle">Allow Methods</label>
+                      <input
+                        className="input"
+                        value={systemConfig.cors_allow_methods}
+                        onChange={(event) =>
+                          setSystemConfig((prev) =>
+                            prev ? { ...prev, cors_allow_methods: event.target.value } : prev
+                          )
+                        }
+                        placeholder="*"
+                      />
+                    </div>
+                    <div>
+                      <label className="subtle">Allow Headers</label>
+                      <input
+                        className="input"
+                        value={systemConfig.cors_allow_headers}
+                        onChange={(event) =>
+                          setSystemConfig((prev) =>
+                            prev ? { ...prev, cors_allow_headers: event.target.value } : prev
+                          )
+                        }
+                        placeholder="*"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid-two">
+                    <label className="toggle-row">
+                      <input
+                        type="checkbox"
+                        checked={systemConfig.cors_allow_credentials}
+                        onChange={(event) =>
+                          setSystemConfig((prev) =>
+                            prev ? { ...prev, cors_allow_credentials: event.target.checked } : prev
+                          )
+                        }
+                      />
+                      Allow credentials
+                    </label>
+                    <div>
+                      <label className="subtle">Max Age (sec)</label>
+                      <input
+                        className="input"
+                        type="number"
+                        value={systemConfig.cors_max_age}
+                        onChange={(event) =>
+                          setSystemConfig((prev) =>
+                            prev
+                              ? { ...prev, cors_max_age: Math.max(0, Number(event.target.value) || 0) }
+                              : prev
+                          )
+                        }
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                <section className="system-card">
+                  <div className="drawer-title">Client Connection</div>
+                  <label className="subtle">API Base</label>
+                  <input
+                    className="input"
+                    value={apiBase}
+                    onChange={(event) => setApiBaseState(event.target.value)}
+                    placeholder="http://localhost:8006/api"
+                  />
+                  <div className="spacer" />
+                  <label className="subtle">Tenant ID</label>
+                  <input
+                    className="input"
+                    value={tenantId}
+                    onChange={(event) => setTenantIdState(event.target.value)}
+                    placeholder={DEFAULT_TENANT}
+                  />
+                  <div className="spacer" />
+                  <button className="ghost-button" type="button" onClick={handleTenantSave}>
+                    Save Connection
+                  </button>
+                </section>
+              </div>
+            )}
+
+            <div className="system-footer">
+              <button className="primary-button" type="button" onClick={() => void handleSystemConfigSave()}>
+                Save Backend Settings
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2547,6 +3413,13 @@ function colorForPersona(id: number) {
   return AGENT_COLORS[id % AGENT_COLORS.length];
 }
 
+function colorForPriority(priority: 'critical' | 'high' | 'medium' | 'low' | string) {
+  if (priority === 'critical') return '#b7482f';
+  if (priority === 'high') return '#c57a1b';
+  if (priority === 'medium') return '#2d6eea';
+  return '#1d8a7a';
+}
+
 function buildCommentSignature(comments: CommentRead[]): string {
   if (comments.length === 0) return '0';
   return comments
@@ -2555,6 +3428,30 @@ function buildCommentSignature(comments: CommentRead[]): string {
         `${comment.id}|${comment.review_job_id}|${comment.start_offset}|${comment.end_offset}|${comment.created_at}|${comment.text}`
     )
     .join('||');
+}
+
+function formatCommentBody(comment: CommentRead): string {
+  const raw = (comment.text || '').trim();
+  if (!raw) return '';
+  if (!comment.excerpt) return raw;
+
+  const excerpt = comment.excerpt.trim();
+  if (!excerpt) return raw;
+
+  // Hide inline duplicated source text from feedback cards while keeping it discoverable via details.
+  const withoutExactExcerpt = raw.replace(excerpt, '').trim();
+  const normalizedExcerpt = excerpt.replace(/^["'`]+|["'`]+$/g, '').trim();
+  const withoutNormalizedExcerpt =
+    withoutExactExcerpt === raw
+      ? raw.replace(normalizedExcerpt, '').trim()
+      : withoutExactExcerpt;
+
+  const cleaned = withoutNormalizedExcerpt
+    .replace(/^(quote|quoted text|excerpt|source)\s*:\s*/i, '')
+    .replace(/^\-\s*(quote|quoted text|excerpt|source)\s*:\s*/i, '')
+    .trim();
+
+  return cleaned || raw;
 }
 
 function splitLines(value: string): string[] {

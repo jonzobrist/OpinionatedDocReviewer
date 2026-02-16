@@ -57,6 +57,7 @@ The app now uses path-based navigation. Refresh keeps you on the same page:
 - Agents: `/agents`
 - History: `/history`
 - System: `/system`
+- Admin: `/admin`
 
 Home supports deep links to a document:
 
@@ -163,6 +164,25 @@ Official docs:
 - Bedrock model IDs/availability: [Supported foundation models in Amazon Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/foundation-models-reference.html)
 - Bedrock Converse API: [Converse API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html)
 - AWS credentials: [Boto3 Credentials](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html)
+
+## Meta Reviewer Calibration
+
+Meta Reviewer synthesis priorities are calibrated as:
+
+- `critical`: unsafe, incorrect, or security/compliance-dangerous content
+- `high`: materially misleading or likely to cause implementation mistakes
+- `medium`: quality issues that should be improved
+- `low`: stylistic or optional improvements
+
+Categories:
+
+- `structure`, `clarity`, `technical`, `security`, `accessibility`, `style`
+
+Operational safeguards:
+
+- Input guardrails cap source comments/groups for a single synthesis run.
+- If synthesis fails, API returns a clear error and fallback unsynthesized mode is available.
+- Meta runs log structured completion/failure entries with tenant/version/job context and duration.
 
 ## GitHub Push Notes
 

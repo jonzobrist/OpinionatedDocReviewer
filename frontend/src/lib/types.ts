@@ -56,6 +56,16 @@ export type SystemConfigRead = {
   bedrock_model_id: string;
   bedrock_region: string;
   review_inline: boolean;
+  redis_url: string;
+  review_queue_name: string;
+  doc_repo_enabled: boolean;
+  doc_repo_root: string;
+  cors_allow_origins: string;
+  cors_allow_origin_regex: string | null;
+  cors_allow_credentials: boolean;
+  cors_allow_methods: string;
+  cors_allow_headers: string;
+  cors_max_age: number;
   openai_api_key_set: boolean;
   bedrock_access_key_set: boolean;
   bedrock_secret_key_set: boolean;
@@ -119,4 +129,101 @@ export type ReviewJobRead = {
   model: string;
   completed_at: string | null;
   created_at: string;
+};
+
+export type AdminUserRead = {
+  id: number;
+  tenant_id: string;
+  name: string;
+  email: string;
+  role: 'admin' | 'default';
+  is_active: boolean;
+  created_at: string;
+};
+
+export type DocumentPermissionRead = {
+  id: number;
+  tenant_id: string;
+  document_id: number;
+  user_id: number;
+  permission_level: 'owner' | 'editor' | 'viewer';
+  created_at: string;
+  user_name: string;
+  user_email: string;
+};
+
+export type AdminJobRead = {
+  id: number;
+  document_version_id: number;
+  document_id: number;
+  document_title: string;
+  status: string;
+  trigger: string;
+  provider: string;
+  model: string;
+  created_at: string;
+  completed_at: string | null;
+};
+
+export type AdminOverview = {
+  tenant_id: string;
+  repository: {
+    enabled: boolean;
+    root: string;
+    tenant_root: string;
+    repository_count: number;
+  };
+  users: {
+    total: number;
+    admins: number;
+    active: number;
+  };
+  documents: {
+    total: number;
+    archived: number;
+    active: number;
+  };
+  jobs: {
+    in_progress: number;
+    completed: number;
+    failed: number;
+    recent_total: number;
+  };
+  in_progress_jobs: AdminJobRead[];
+  recent_jobs: AdminJobRead[];
+};
+
+export type MetaCommentSourceRead = {
+  id: number;
+  comment_id: number;
+  reviewer_name: string;
+  reviewer_id: number;
+  original_comment_text: string;
+};
+
+export type MetaCommentRead = {
+  id: number;
+  content: string;
+  category: 'structure' | 'clarity' | 'technical' | 'security' | 'accessibility' | 'style';
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  start_offset: number;
+  end_offset: number;
+  order_index: number;
+  is_unsynthesized: boolean;
+  sources: MetaCommentSourceRead[];
+};
+
+export type MetaReviewRunRead = {
+  id: number;
+  tenant_id: string;
+  document_version_id: number;
+  review_job_id: number | null;
+  input_hash: string;
+  status: string;
+  is_synthesized: boolean;
+  provider: string;
+  model: string;
+  error_message: string | null;
+  created_at: string;
+  comments: MetaCommentRead[];
 };

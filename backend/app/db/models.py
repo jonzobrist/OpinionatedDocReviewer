@@ -65,6 +65,9 @@ class Document(Base):
     versions: Mapped[List["DocumentVersion"]] = relationship(
         "DocumentVersion", back_populates="document", cascade="all, delete-orphan"
     )
+    permissions: Mapped[List["DocumentPermission"]] = relationship(
+        "DocumentPermission", back_populates="document", cascade="all, delete-orphan"
+    )
 
 
 class DocumentVersion(Base):
@@ -100,6 +103,9 @@ class ReviewJob(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
+    meta_review_runs: Mapped[List["MetaReviewRun"]] = relationship(
+        "MetaReviewRun", back_populates="review_job", cascade="all, delete-orphan"
+    )
 
 
 class Comment(Base):
@@ -123,3 +129,118 @@ class Comment(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
+    meta_comment_sources: Mapped[List["MetaCommentSource"]] = relationship(
+        "MetaCommentSource", back_populates="comment", cascade="all, delete-orphan"
+    )
+
+
+class MetaReviewRun(Base):
+    __tablename__ = "meta_review_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    document_version_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("document_versions.id", ondelete="CASCADE"), index=True
+    )
+    review_job_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("review_jobs.id", ondelete="SET NULL"), index=True, default=None
+    )
+    input_hash: Mapped[str] = mapped_column(String(128), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="completed")
+    is_synthesized: Mapped[bool] = mapped_column(Boolean, default=True)
+    provider: Mapped[str] = mapped_column(String(50), default="openai")
+    model: Mapped[str] = mapped_column(String(200), default="gpt-4o-mini")
+    error_message: Mapped[str | None] = mapped_column(String(2000), default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    review_job: Mapped[ReviewJob | None] = relationship("ReviewJob", back_populates="meta_review_runs")
+    comments: Mapped[List["MetaComment"]] = relationship(
+        "MetaComment", back_populates="run", cascade="all, delete-orphan"
+    )
+
+
+class MetaComment(Base):
+    __tablename__ = "meta_comments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    meta_review_run_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("meta_review_runs.id", ondelete="CASCADE"), index=True
+    )
+    content: Mapped[str] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(32), default="clarity")
+    priority: Mapped[str] = mapped_column(String(16), default="medium")
+    start_offset: Mapped[int] = mapped_column(Integer, default=0)
+    end_offset: Mapped[int] = mapped_column(Integer, default=0)
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    is_unsynthesized: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    run: Mapped[MetaReviewRun] = relationship("MetaReviewRun", back_populates="comments")
+    sources: Mapped[List["MetaCommentSource"]] = relationship(
+        "MetaCommentSource", back_populates="meta_comment", cascade="all, delete-orphan"
+    )
+
+
+class MetaCommentSource(Base):
+    __tablename__ = "meta_comment_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    meta_comment_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("meta_comments.id", ondelete="CASCADE"), index=True
+    )
+    comment_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("comments.id", ondelete="CASCADE"), index=True
+    )
+    reviewer_name: Mapped[str] = mapped_column(String(200))
+    reviewer_id: Mapped[int] = mapped_column(Integer)
+    original_comment_text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    meta_comment: Mapped[MetaComment] = relationship("MetaComment", back_populates="sources")
+    comment: Mapped[Comment] = relationship("Comment", back_populates="meta_comment_sources")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(200), index=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    role: Mapped[str] = mapped_column(String(32), default="default")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    permissions: Mapped[List["DocumentPermission"]] = relationship(
+        "DocumentPermission", back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class DocumentPermission(Base):
+    __tablename__ = "document_permissions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    document_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    permission_level: Mapped[str] = mapped_column(String(32), default="viewer")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    document: Mapped[Document] = relationship("Document", back_populates="permissions")
+    user: Mapped[User] = relationship("User", back_populates="permissions")

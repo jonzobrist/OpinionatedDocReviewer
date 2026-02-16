@@ -112,6 +112,16 @@ describe('page controls', () => {
           bedrock_model_id: 'anthropic.claude-3-5-haiku-20241022-v1:0',
           bedrock_region: 'us-east-1',
           review_inline: false,
+          redis_url: 'redis://localhost:6379/0',
+          review_queue_name: 'review-jobs',
+          doc_repo_enabled: true,
+          doc_repo_root: '.run/doc-repos',
+          cors_allow_origins: 'http://localhost:3000,https://opinion.zlyxy.me',
+          cors_allow_origin_regex: null,
+          cors_allow_credentials: false,
+          cors_allow_methods: '*',
+          cors_allow_headers: '*',
+          cors_max_age: 600,
           openai_api_key_set: false,
           bedrock_access_key_set: false,
           bedrock_secret_key_set: false,
@@ -129,6 +139,16 @@ describe('page controls', () => {
           bedrock_model_id: body.bedrock_model_id ?? 'anthropic.claude-3-5-haiku-20241022-v1:0',
           bedrock_region: body.bedrock_region ?? 'us-east-1',
           review_inline: body.review_inline ?? false,
+          redis_url: body.redis_url ?? 'redis://localhost:6379/0',
+          review_queue_name: body.review_queue_name ?? 'review-jobs',
+          doc_repo_enabled: body.doc_repo_enabled ?? true,
+          doc_repo_root: body.doc_repo_root ?? '.run/doc-repos',
+          cors_allow_origins: body.cors_allow_origins ?? 'http://localhost:3000,https://opinion.zlyxy.me',
+          cors_allow_origin_regex: body.cors_allow_origin_regex ?? null,
+          cors_allow_credentials: body.cors_allow_credentials ?? false,
+          cors_allow_methods: body.cors_allow_methods ?? '*',
+          cors_allow_headers: body.cors_allow_headers ?? '*',
+          cors_max_age: body.cors_max_age ?? 600,
           openai_api_key_set: false,
           bedrock_access_key_set: false,
           bedrock_secret_key_set: false,
@@ -136,6 +156,71 @@ describe('page controls', () => {
         });
       }
       if (url.endsWith('/health')) return json({ status: 'ok' });
+      if (url.endsWith('/admin/overview')) {
+        return json({
+          tenant_id: 'local-dev',
+          repository: {
+            enabled: true,
+            root: '.run/doc-repos',
+            tenant_root: '.run/doc-repos/local-dev',
+            repository_count: 1
+          },
+          users: { total: 1, admins: 1, active: 1 },
+          documents: { total: 0, archived: 0, active: 0 },
+          jobs: { in_progress: 0, completed: 0, failed: 0, recent_total: 0 },
+          in_progress_jobs: [],
+          recent_jobs: []
+        });
+      }
+      if (url.includes('/admin/users')) {
+        if (!init?.method || init.method === 'GET') {
+          return json([
+            {
+              id: 1,
+              tenant_id: 'local-dev',
+              name: 'Local Admin',
+              email: 'admin@local',
+              role: 'admin',
+              is_active: true,
+              created_at: new Date().toISOString()
+            }
+          ]);
+        }
+        if (init.method === 'POST') {
+          const body = JSON.parse(String(init.body || '{}'));
+          return json(
+            {
+              id: 2,
+              tenant_id: 'local-dev',
+              name: body.name,
+              email: body.email,
+              role: body.role,
+              is_active: true,
+              created_at: new Date().toISOString()
+            },
+            201
+          );
+        }
+      }
+      if (url.includes('/admin/permissions')) {
+        if (!init?.method || init.method === 'GET') return json([]);
+        if (init.method === 'POST') {
+          const body = JSON.parse(String(init.body || '{}'));
+          return json(
+            {
+              id: 1,
+              tenant_id: 'local-dev',
+              document_id: body.document_id,
+              user_id: body.user_id,
+              permission_level: body.permission_level,
+              created_at: new Date().toISOString(),
+              user_name: 'Local Admin',
+              user_email: 'admin@local'
+            },
+            201
+          );
+        }
+      }
       if (init?.method === 'POST' || init?.method === 'PATCH' || init?.method === 'DELETE') {
         return json({}, 204);
       }
@@ -187,5 +272,12 @@ describe('page controls', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Save Agent' })).toBeTruthy();
     });
+  });
+
+  it('opens admin overlay from route', async () => {
+    mockPathname = '/admin';
+    render(<HomePage />);
+    expect(await screen.findByText('Administrator')).toBeTruthy();
+    expect(await screen.findByText('Repository')).toBeTruthy();
   });
 });
