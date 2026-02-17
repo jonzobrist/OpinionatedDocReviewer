@@ -14,6 +14,9 @@ from app.reviews.review_storage import write_review_and_commit
 from datetime import datetime, timezone
 from app.reviews.llm_provider import generate_completion, get_provider_name
 
+REVIEW_TIMEOUT_RETRIES = 3
+REVIEW_TIMEOUT_BACKOFF_SECONDS = [1, 2, 4]
+
 
 def run_review_job(review_job_id: int, tenant_id: str) -> None:
     db = SessionLocal()
@@ -194,21 +197,36 @@ def generate_comments_for_spec(persona: dict, content: str) -> list[str]:
         flush=True,
     )
 
-    executor = ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(generate_completion, prompt)
-    try:
-        text = future.result(timeout=settings.OPENAI_TIMEOUT_SECONDS)
-    except FutureTimeout:
-        future.cancel()
-        executor.shutdown(wait=False, cancel_futures=True)
-        raise TimeoutError(f"{get_provider_name()} request timed out")
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+    text = _generate_with_timeout_retry(prompt)
     print(
         f"[review] {get_provider_name()} call took {time.time() - start:.2f}s",
         flush=True,
     )
     return parse_bullets(text)
+
+
+def _generate_with_timeout_retry(prompt: str) -> str:
+    last_error: Exception | None = None
+    for attempt in range(1, REVIEW_TIMEOUT_RETRIES + 1):
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(generate_completion, prompt)
+        try:
+            return future.result(timeout=settings.OPENAI_TIMEOUT_SECONDS)
+        except FutureTimeout as exc:
+            future.cancel()
+            last_error = TimeoutError(f"{get_provider_name()} request timed out")
+            if attempt < REVIEW_TIMEOUT_RETRIES:
+                time.sleep(REVIEW_TIMEOUT_BACKOFF_SECONDS[min(attempt - 1, len(REVIEW_TIMEOUT_BACKOFF_SECONDS) - 1)])
+        except Exception as exc:
+            message = str(exc).lower()
+            last_error = exc
+            if "timeout" in message and attempt < REVIEW_TIMEOUT_RETRIES:
+                time.sleep(REVIEW_TIMEOUT_BACKOFF_SECONDS[min(attempt - 1, len(REVIEW_TIMEOUT_BACKOFF_SECONDS) - 1)])
+            else:
+                raise
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+    raise TimeoutError(f"{get_provider_name()} request timed out after {REVIEW_TIMEOUT_RETRIES} attempts") from last_error
 
 
 def build_prompt(
@@ -275,3 +293,74 @@ def persist_comments(
             )
         )
     db.commit()
+
+
+def retry_failed_persona_in_job(
+    review_job_id: int,
+    tenant_id: str,
+    persona_id: int,
+) -> int:
+    db = SessionLocal()
+    try:
+        job = (
+            db.query(models.ReviewJob)
+            .filter(
+                models.ReviewJob.id == review_job_id,
+                models.ReviewJob.tenant_id == tenant_id,
+            )
+            .first()
+        )
+        if not job:
+            return 0
+        version = (
+            db.query(models.DocumentVersion)
+            .filter(
+                models.DocumentVersion.id == job.document_version_id,
+                models.DocumentVersion.tenant_id == tenant_id,
+            )
+            .first()
+        )
+        if not version:
+            return 0
+        persona = (
+            db.query(models.Persona)
+            .filter(
+                models.Persona.tenant_id == tenant_id,
+                models.Persona.id == persona_id,
+            )
+            .first()
+        )
+        if not persona:
+            return 0
+
+        db.query(models.Comment).filter(
+            models.Comment.tenant_id == tenant_id,
+            models.Comment.review_job_id == review_job_id,
+            models.Comment.persona_id == persona_id,
+            models.Comment.text.like("Review failed:%"),
+        ).delete(synchronize_session=False)
+        db.commit()
+
+        comments = generate_comments_for_spec(
+            {
+                "id": persona.id,
+                "name": persona.name,
+                "description": persona.description,
+                "system_prompt": persona.system_prompt,
+                "focus_areas": persona.focus_areas,
+                "tone": persona.tone,
+            },
+            version.content,
+        )
+        persist_comments(
+            db,
+            tenant_id,
+            version.id,
+            persona.id,
+            review_job_id,
+            comments,
+            version.content,
+        )
+        return len(comments)
+    finally:
+        db.close()

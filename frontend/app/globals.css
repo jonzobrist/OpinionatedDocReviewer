@@ -581,6 +581,12 @@ main {
   color: var(--ink-500);
 }
 
+.retry-button {
+  margin-top: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
 .comment-source summary {
   cursor: pointer;
   user-select: none;

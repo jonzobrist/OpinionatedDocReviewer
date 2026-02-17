@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_tenant_id
+from app.db import models
 from app.crud.document_version import get_version
 from app.crud.review_job import create_job, list_jobs, get_latest_job_for_version
 from app.reviews.queue import enqueue_review_job
-from app.reviews.worker import run_review_job
+from app.reviews.worker import run_review_job, retry_failed_persona_in_job
 from app.core.config import settings
 from app.schemas.review_job import ReviewJobCreate, ReviewJobRead
 
@@ -51,3 +52,29 @@ def create(
         run_review_job(job.id, tenant_id)
         db.refresh(job)
     return job
+
+
+@router.post("/{review_job_id}/retry-persona/{persona_id}")
+def retry_persona(
+    review_job_id: int,
+    persona_id: int,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+) -> dict:
+    existing = (
+        db.query(models.ReviewJob)
+        .filter(
+            models.ReviewJob.id == review_job_id,
+            models.ReviewJob.tenant_id == tenant_id,
+        )
+        .first()
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Review job not found")
+    try:
+        added = retry_failed_persona_in_job(review_job_id, tenant_id, persona_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Retry failed: {exc}") from exc
+    if added == 0:
+        raise HTTPException(status_code=404, detail="Persona or document context not found")
+    return {"status": "retried", "review_job_id": review_job_id, "persona_id": persona_id, "comments_added": added}

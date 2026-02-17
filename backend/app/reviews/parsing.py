@@ -18,6 +18,16 @@ def parse_bullets(text: str) -> list[str]:
     return bullets
 
 
+def normalize_comment_text(comment: str) -> str:
+    cleaned = (comment or "").strip()
+    if not cleaned:
+        return ""
+    # Remove common malformed empty-quote prefixes, e.g. "\"\" :: comment"
+    cleaned = re.sub(r'^\s*["\']{2}\s*::\s*', "", cleaned)
+    cleaned = re.sub(r'^\s*["\']\s*["\']\s*::\s*', "", cleaned)
+    return cleaned.strip()
+
+
 def extract_excerpt(content: str, comment: str) -> tuple[str | None, int, int]:
     for pattern in (r"\"([^\"]{5,200})\"", r"'([^']{5,200})'"):
         match = re.search(pattern, comment)
@@ -50,6 +60,9 @@ def persist_comment_payloads(
 ) -> list[tuple[str, str | None, int, int]]:
     payloads: list[tuple[str, str | None, int, int]] = []
     for comment in comments:
-        excerpt, start, end = extract_excerpt(content, comment)
-        payloads.append((comment, excerpt, start, end))
+        normalized = normalize_comment_text(comment)
+        if not normalized:
+            continue
+        excerpt, start, end = extract_excerpt(content, normalized)
+        payloads.append((normalized, excerpt, start, end))
     return payloads

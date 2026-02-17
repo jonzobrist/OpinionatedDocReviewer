@@ -2087,6 +2087,26 @@ function HomePageContent() {
                       </span>
                     </div>
                     <div className="comment-text">{formatCommentBody(comment)}</div>
+                    {isFailure && selectedReviewJobId && (
+                      <button
+                        className="ghost-button retry-button"
+                        type="button"
+                        onClick={async (event) => {
+                          event.stopPropagation();
+                          try {
+                            await apiFetch(`/review-jobs/${selectedReviewJobId}/retry-persona/${comment.persona_id}`, {
+                              method: 'POST'
+                            });
+                            setStatusMessage('Retry queued for failed reviewer.');
+                            await loadComments(selectedVersion.id, false, selectedReviewJobId);
+                          } catch (error) {
+                            setErrorMessage(normalizeError(error));
+                          }
+                        }}
+                      >
+                        Retry
+                      </button>
+                    )}
                     {comment.excerpt && (
                       <details className="comment-source">
                         <summary>Show linked text</summary>

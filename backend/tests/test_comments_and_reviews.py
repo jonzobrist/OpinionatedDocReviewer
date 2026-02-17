@@ -58,3 +58,52 @@ def test_comments_and_review_jobs(client, monkeypatch) -> None:
     )
     assert list_comments.status_code == 200
     assert len(list_comments.json()) == 1
+
+
+def test_retry_failed_persona_endpoint(client, monkeypatch) -> None:
+    def _noop_enqueue(job_id: int, tenant_id: str) -> None:
+        return None
+
+    monkeypatch.setattr("app.api.review_jobs.enqueue_review_job", _noop_enqueue)
+    monkeypatch.setattr(
+        "app.api.review_jobs.retry_failed_persona_in_job",
+        lambda review_job_id, tenant_id, persona_id: 2,
+    )
+    headers = {"X-Tenant-Id": "tenant-retry"}
+
+    persona_resp = client.post(
+        "/api/personas",
+        json={
+            "name": "Retry Persona",
+            "description": "retry",
+            "system_prompt": "retry",
+            "focus_areas": [],
+            "tone": "direct",
+            "is_active": True,
+            "group_id": None,
+        },
+        headers=headers,
+    )
+    persona_id = persona_resp.json()["id"]
+
+    doc_resp = client.post("/api/documents", json={"title": "Doc"}, headers=headers)
+    doc_id = doc_resp.json()["id"]
+    version_resp = client.post(
+        f"/api/documents/{doc_id}/versions",
+        json={"version_label": "v1", "content": "hello"},
+        headers=headers,
+    )
+    version_id = version_resp.json()["id"]
+    job_resp = client.post(
+        "/api/review-jobs",
+        json={"document_version_id": version_id},
+        headers=headers,
+    )
+    job_id = job_resp.json()["id"]
+
+    retry_resp = client.post(
+        f"/api/review-jobs/{job_id}/retry-persona/{persona_id}",
+        headers=headers,
+    )
+    assert retry_resp.status_code == 200
+    assert retry_resp.json()["status"] == "retried"

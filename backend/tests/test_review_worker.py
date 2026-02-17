@@ -1,7 +1,7 @@
 from app.db import models
 from app.db.init_db import seed_default_personas
 from app.db.session import SessionLocal
-from app.reviews.worker import run_review_job
+from app.reviews.worker import run_review_job, _generate_with_timeout_retry
 
 
 def test_review_worker_generates_comments(monkeypatch) -> None:
@@ -55,3 +55,19 @@ def test_review_worker_generates_comments(monkeypatch) -> None:
         assert comments[0].review_job_id == job.id
     finally:
         db.close()
+
+
+def test_generate_with_timeout_retry_retries_on_timeout(monkeypatch) -> None:
+    calls = {"count": 0}
+
+    def _fake_generate(_prompt: str) -> str:
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise TimeoutError("request timed out")
+        return "- \"a\" :: ok"
+
+    monkeypatch.setattr("app.reviews.worker.generate_completion", _fake_generate)
+    monkeypatch.setattr("app.reviews.worker.time.sleep", lambda _seconds: None)
+    output = _generate_with_timeout_retry("prompt")
+    assert output == '- "a" :: ok'
+    assert calls["count"] == 3
