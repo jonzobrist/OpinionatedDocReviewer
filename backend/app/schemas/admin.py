@@ -65,6 +65,19 @@ class AdminJobRead(BaseModel):
     completed_at: datetime | None
 
 
+class AdminActionRead(BaseModel):
+    id: int
+    actor_user_id: int | None
+    actor_email: str | None
+    action: str
+    target_type: str
+    target_id: int | None
+    details: str | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class AdminOverview(BaseModel):
     tenant_id: str
     repository: dict
@@ -73,3 +86,4 @@ class AdminOverview(BaseModel):
     jobs: dict
     in_progress_jobs: list[AdminJobRead]
     recent_jobs: list[AdminJobRead]
+    recent_actions: list[AdminActionRead]

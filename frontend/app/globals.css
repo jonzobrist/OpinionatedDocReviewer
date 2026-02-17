@@ -1168,6 +1168,11 @@ main {
   flex-wrap: wrap;
 }
 
+.agents-actions .input.compact {
+  width: auto;
+  min-width: 220px;
+}
+
 .agents-workspace {
   min-height: 0;
   flex: 1;
@@ -1263,6 +1268,13 @@ main {
 
 .agents-danger {
   margin-top: 12px;
+}
+
+.agent-import-preview {
+  border: 1px solid var(--surface-3);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.84);
+  padding: 12px;
 }
 
 .system-overlay {
@@ -1418,6 +1430,30 @@ main {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.admin-matrix-wrap {
+  overflow: auto;
+}
+
+.admin-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.admin-matrix th,
+.admin-matrix td {
+  border: 1px solid var(--surface-3);
+  padding: 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.admin-matrix th {
+  background: rgba(248, 250, 253, 0.9);
+  color: var(--ink-600);
+  font-weight: 700;
 }
 
 .input.compact {

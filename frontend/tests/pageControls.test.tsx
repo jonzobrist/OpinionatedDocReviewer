@@ -71,9 +71,33 @@ describe('page controls', () => {
         created_at: new Date().toISOString()
       }
     ];
+    const documentLibraryPayload = [
+      {
+        id: 101,
+        title: 'Design Notes',
+        latest_version_number: 1,
+        latest_version_created_at: new Date().toISOString(),
+        latest_review_status: 'completed',
+        latest_review_job_id: 501
+      }
+    ];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith('/documents/library')) return json([]);
+      if (url.endsWith('/personas/bundle/export')) {
+        return json({
+          schema_version: 'v1',
+          exported_at: new Date().toISOString(),
+          personas: []
+        });
+      }
+      if (url.endsWith('/personas/bundle/import') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body || '{}'));
+        if (body.dry_run) {
+          return json({ created: 1, updated: 0, renamed: 0, skipped: 0, errors: [] });
+        }
+        return json({ created: 1, updated: 0, renamed: 0, skipped: 0, errors: [] });
+      }
+      if (url.endsWith('/documents/library')) return json(documentLibraryPayload);
       if (url.endsWith('/documents')) return json([]);
       if (url.endsWith('/personas') && (!init || init.method === 'GET')) return json(personasPayload);
       if (url.endsWith('/personas') && init?.method === 'POST') {
@@ -166,10 +190,35 @@ describe('page controls', () => {
             repository_count: 1
           },
           users: { total: 1, admins: 1, active: 1 },
-          documents: { total: 0, archived: 0, active: 0 },
-          jobs: { in_progress: 0, completed: 0, failed: 0, recent_total: 0 },
+          documents: { total: 1, archived: 0, active: 1 },
+          jobs: { in_progress: 0, completed: 1, failed: 0, recent_total: 1 },
           in_progress_jobs: [],
-          recent_jobs: []
+          recent_jobs: [
+            {
+              id: 501,
+              document_version_id: 401,
+              document_id: 101,
+              document_title: 'Design Notes',
+              status: 'completed',
+              trigger: 'upload',
+              provider: 'openai',
+              model: 'gpt-4o-mini',
+              created_at: new Date().toISOString(),
+              completed_at: new Date().toISOString()
+            }
+          ],
+          recent_actions: [
+            {
+              id: 1,
+              actor_user_id: 1,
+              actor_email: 'admin@local',
+              action: 'permission.update',
+              target_type: 'permission',
+              target_id: 1,
+              details: 'level=viewer',
+              created_at: new Date().toISOString()
+            }
+          ]
         });
       }
       if (url.includes('/admin/users')) {
@@ -203,7 +252,19 @@ describe('page controls', () => {
         }
       }
       if (url.includes('/admin/permissions')) {
-        if (!init?.method || init.method === 'GET') return json([]);
+        if (!init?.method || init.method === 'GET')
+          return json([
+            {
+              id: 1,
+              tenant_id: 'local-dev',
+              document_id: 101,
+              user_id: 1,
+              permission_level: 'viewer',
+              created_at: new Date().toISOString(),
+              user_name: 'Local Admin',
+              user_email: 'admin@local'
+            }
+          ]);
         if (init.method === 'POST') {
           const body = JSON.parse(String(init.body || '{}'));
           return json(
@@ -279,5 +340,31 @@ describe('page controls', () => {
     render(<HomePage />);
     expect(await screen.findByText('Administrator')).toBeTruthy();
     expect(await screen.findByText('Repository')).toBeTruthy();
+    expect(await screen.findByText('Permission Matrix')).toBeTruthy();
+    expect(await screen.findByText('Recent Admin Actions')).toBeTruthy();
+    expect((await screen.findAllByText('Design Notes')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('level=viewer')).toBeTruthy();
+    expect(await screen.findByText('permission.update · permission #1')).toBeTruthy();
+  });
+
+  it('previews and applies agent import bundle', async () => {
+    mockPathname = '/agents';
+    render(<HomePage />);
+
+    const fileInput = document.querySelector('input[type="file"][accept="application/json,.json"]');
+    expect(fileInput).toBeTruthy();
+    const bundle = {
+      name: 'agents.json',
+      text: async () =>
+        JSON.stringify({
+          schema_version: 'v1',
+          personas: []
+        })
+    };
+    fireEvent.change(fileInput as HTMLInputElement, { target: { files: [bundle] } });
+
+    expect(await screen.findByText(/Import Preview: agents.json/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Import' }));
+    expect(await screen.findByText(/Import complete:/i)).toBeTruthy();
   });
 });

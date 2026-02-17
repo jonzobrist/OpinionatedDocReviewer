@@ -92,6 +92,19 @@ Do not commit secrets.
 - Or configure via `backend/.env` / `backend/config.toml` (examples in `backend/.env.example` and `backend/config.example.toml`).
 - CORS is configurable in backend env/config; see `PRODUCT.md`.
 
+## Agent Import/Export Packs
+
+Agent Studio supports structured portability for reviewer configs:
+
+- Export bundle: `GET /api/personas/bundle/export`
+- Import bundle: `POST /api/personas/bundle/import`
+  - `conflict_policy`: `skip|overwrite|rename`
+  - `dry_run`: preview without persisting
+
+Format and sharing conventions:
+
+- `/Users/zob/src/OpinionatedDocReviewer/docs/agent-pack-format.md`
+
 ## LLM Provider Setup
 
 The app supports two review providers:

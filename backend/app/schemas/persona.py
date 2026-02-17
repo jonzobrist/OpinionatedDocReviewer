@@ -57,3 +57,41 @@ class PersonaRead(PersonaBase):
     tenant_id: str
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+
+class PersonaPortable(BaseModel):
+    name: str
+    description: str | None = None
+    system_prompt: str
+    focus_areas: List[str] = Field(default_factory=list)
+    tone: str | None = None
+    reference_notes: str | None = None
+    output_requirements: PersonaOutputRequirements = Field(
+        default_factory=PersonaOutputRequirements
+    )
+    examples: List[str] = Field(default_factory=list)
+    sort_order: int = 100
+    color_theme: str | None = None
+    is_active: bool = True
+    group_name: str | None = None
+
+
+class PersonaImportRequest(BaseModel):
+    schema_version: str = "v1"
+    conflict_policy: str = Field(default="skip", pattern="^(skip|overwrite|rename)$")
+    dry_run: bool = False
+    personas: List[PersonaPortable] = Field(default_factory=list)
+
+
+class PersonaImportResult(BaseModel):
+    created: int = 0
+    updated: int = 0
+    renamed: int = 0
+    skipped: int = 0
+    errors: List[str] = Field(default_factory=list)
+
+
+class PersonaExportBundle(BaseModel):
+    schema_version: str = "v1"
+    exported_at: datetime
+    personas: List[PersonaPortable] = Field(default_factory=list)

@@ -1,7 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_tenant_id
+from app.api.deps import (
+    get_db,
+    get_tenant_id,
+    get_request_user,
+    require_document_permission,
+)
+from app.db import models
 from app.crud.comment import create_comment, list_comments_by_version
 from app.crud.document_version import get_version
 from app.crud.persona import get_persona
@@ -16,10 +22,12 @@ def list_by_version(
     review_job_id: int | None = None,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
+    current_user: models.User = Depends(get_request_user),
 ) -> list[CommentRead]:
     version = get_version(db, tenant_id, document_version_id)
     if not version:
         raise HTTPException(status_code=404, detail="Document version not found")
+    require_document_permission(db, tenant_id, current_user, version.document_id, "viewer")
     return list_comments_by_version(db, tenant_id, document_version_id, review_job_id)
 
 
@@ -28,10 +36,12 @@ def create(
     payload: CommentCreate,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
+    current_user: models.User = Depends(get_request_user),
 ) -> CommentRead:
     version = get_version(db, tenant_id, payload.document_version_id)
     if not version:
         raise HTTPException(status_code=404, detail="Document version not found")
+    require_document_permission(db, tenant_id, current_user, version.document_id, "editor")
     persona = get_persona(db, tenant_id, payload.persona_id)
     if not persona:
         raise HTTPException(status_code=404, detail="Persona not found")

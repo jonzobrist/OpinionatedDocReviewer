@@ -1,5 +1,8 @@
 def test_admin_overview_and_user_permission_crud(client) -> None:
-    headers = {"X-Tenant-Id": "tenant-admin"}
+    headers = {
+        "X-Tenant-Id": "tenant-admin",
+        "X-User-Email": "admin+tenant-admin@local",
+    }
 
     doc_resp = client.post("/api/documents", json={"title": "Policy"}, headers=headers)
     assert doc_resp.status_code == 201
@@ -26,6 +29,7 @@ def test_admin_overview_and_user_permission_crud(client) -> None:
     assert "repository" in overview_body
     assert "users" in overview_body
     assert "jobs" in overview_body
+    assert "recent_actions" in overview_body
 
     users_resp = client.get("/api/admin/users", headers=headers)
     assert users_resp.status_code == 200
@@ -85,3 +89,25 @@ def test_admin_overview_and_user_permission_crud(client) -> None:
 
     delete_user_resp = client.delete(f"/api/admin/users/{user_id}", headers=headers)
     assert delete_user_resp.status_code == 204
+
+    actions = client.get("/api/admin/actions", headers=headers)
+    assert actions.status_code == 200
+    assert len(actions.json()) >= 1
+
+
+def test_admin_endpoint_denies_non_admin(client) -> None:
+    tenant_headers = {"X-Tenant-Id": "tenant-admin-deny", "X-User-Email": "member@example.com"}
+    create_user = client.post(
+        "/api/admin/users",
+        json={
+            "name": "Member",
+            "email": "member@example.com",
+            "role": "default",
+            "is_active": True,
+        },
+        headers={"X-Tenant-Id": "tenant-admin-deny", "X-User-Email": "admin+tenant-admin-deny@local"},
+    )
+    assert create_user.status_code == 201
+
+    denied = client.get("/api/admin/overview", headers=tenant_headers)
+    assert denied.status_code == 403

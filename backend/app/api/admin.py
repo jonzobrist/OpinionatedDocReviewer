@@ -6,10 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_tenant_id
+from app.api.deps import get_db, get_tenant_id, require_admin_user
 from app.db import models
 from app.db.init_db import seed_default_admin_user
 from app.schemas.admin import (
+    AdminActionRead,
     AdminJobRead,
     AdminOverview,
     AdminUserCreate,
@@ -21,7 +22,11 @@ from app.schemas.admin import (
 )
 from app.core.config import settings
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_admin_user)],
+)
 
 
 def _get_user(db: Session, tenant_id: str, user_id: int) -> models.User | None:
@@ -67,6 +72,28 @@ def _job_row_to_read(row: tuple) -> AdminJobRead:
         model=job.model,
         created_at=job.created_at,
         completed_at=job.completed_at,
+    )
+
+
+def _log_admin_action(
+    db: Session,
+    tenant_id: str,
+    admin_user: models.User | None,
+    action: str,
+    target_type: str,
+    target_id: int | None,
+    details: str | None = None,
+) -> None:
+    db.add(
+        models.AdminActionLog(
+            tenant_id=tenant_id,
+            actor_user_id=admin_user.id if admin_user else None,
+            actor_email=admin_user.email if admin_user else None,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            details=details,
+        )
     )
 
 
@@ -132,6 +159,13 @@ def get_overview(
         .scalar()
         or 0
     )
+    actions = (
+        db.query(models.AdminActionLog)
+        .filter(models.AdminActionLog.tenant_id == tenant_id)
+        .order_by(models.AdminActionLog.created_at.desc())
+        .limit(30)
+        .all()
+    )
 
     return AdminOverview(
         tenant_id=tenant_id,
@@ -154,6 +188,7 @@ def get_overview(
         },
         in_progress_jobs=[_job_row_to_read(row) for row in in_progress_rows],
         recent_jobs=[_job_row_to_read(row) for row in recent_rows],
+        recent_actions=actions,
     )
 
 
@@ -176,6 +211,7 @@ def create_user(
     payload: AdminUserCreate,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
+    admin_user: models.User = Depends(require_admin_user),
 ) -> models.User:
     existing = (
         db.query(models.User)
@@ -192,6 +228,15 @@ def create_user(
         is_active=payload.is_active,
     )
     db.add(user)
+    _log_admin_action(
+        db,
+        tenant_id,
+        admin_user,
+        action="user.create",
+        target_type="user",
+        target_id=None,
+        details=f"email={payload.email},role={payload.role}",
+    )
     db.commit()
     db.refresh(user)
     return user
@@ -203,6 +248,7 @@ def update_user(
     payload: AdminUserUpdate,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
+    admin_user: models.User = Depends(require_admin_user),
 ) -> models.User:
     user = _get_user(db, tenant_id, user_id)
     if not user:
@@ -210,6 +256,15 @@ def update_user(
     update_data = payload.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(user, key, value)
+    _log_admin_action(
+        db,
+        tenant_id,
+        admin_user,
+        action="user.update",
+        target_type="user",
+        target_id=user.id,
+        details=",".join(f"{k}={v}" for k, v in update_data.items()),
+    )
     db.commit()
     db.refresh(user)
     return user
@@ -220,10 +275,20 @@ def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
+    admin_user: models.User = Depends(require_admin_user),
 ) -> None:
     user = _get_user(db, tenant_id, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    _log_admin_action(
+        db,
+        tenant_id,
+        admin_user,
+        action="user.delete",
+        target_type="user",
+        target_id=user.id,
+        details=user.email,
+    )
     db.delete(user)
     db.commit()
 
@@ -262,6 +327,7 @@ def create_permission(
     payload: DocumentPermissionCreate,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
+    admin_user: models.User = Depends(require_admin_user),
 ) -> DocumentPermissionRead:
     user = _get_user(db, tenant_id, payload.user_id)
     if not user:
@@ -280,6 +346,15 @@ def create_permission(
     )
     if existing:
         existing.permission_level = payload.permission_level
+        _log_admin_action(
+            db,
+            tenant_id,
+            admin_user,
+            action="permission.update",
+            target_type="permission",
+            target_id=existing.id,
+            details=f"doc={payload.document_id},user={payload.user_id},level={payload.permission_level}",
+        )
         db.commit()
         db.refresh(existing)
         perm = existing
@@ -291,6 +366,15 @@ def create_permission(
             permission_level=payload.permission_level,
         )
         db.add(perm)
+        _log_admin_action(
+            db,
+            tenant_id,
+            admin_user,
+            action="permission.create",
+            target_type="permission",
+            target_id=None,
+            details=f"doc={payload.document_id},user={payload.user_id},level={payload.permission_level}",
+        )
         db.commit()
         db.refresh(perm)
     return DocumentPermissionRead(
@@ -311,6 +395,7 @@ def update_permission(
     payload: DocumentPermissionUpdate,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
+    admin_user: models.User = Depends(require_admin_user),
 ) -> DocumentPermissionRead:
     perm = (
         db.query(models.DocumentPermission)
@@ -326,6 +411,15 @@ def update_permission(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     perm.permission_level = payload.permission_level
+    _log_admin_action(
+        db,
+        tenant_id,
+        admin_user,
+        action="permission.update",
+        target_type="permission",
+        target_id=perm.id,
+        details=f"level={payload.permission_level}",
+    )
     db.commit()
     db.refresh(perm)
     return DocumentPermissionRead(
@@ -345,6 +439,7 @@ def delete_permission(
     permission_id: int,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
+    admin_user: models.User = Depends(require_admin_user),
 ) -> None:
     perm = (
         db.query(models.DocumentPermission)
@@ -356,5 +451,29 @@ def delete_permission(
     )
     if not perm:
         raise HTTPException(status_code=404, detail="Permission not found")
+    _log_admin_action(
+        db,
+        tenant_id,
+        admin_user,
+        action="permission.delete",
+        target_type="permission",
+        target_id=perm.id,
+        details=f"doc={perm.document_id},user={perm.user_id}",
+    )
     db.delete(perm)
     db.commit()
+
+
+@router.get("/actions", response_model=list[AdminActionRead])
+def list_actions(
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+) -> list[models.AdminActionLog]:
+    return (
+        db.query(models.AdminActionLog)
+        .filter(models.AdminActionLog.tenant_id == tenant_id)
+        .order_by(models.AdminActionLog.created_at.desc())
+        .limit(limit)
+        .all()
+    )

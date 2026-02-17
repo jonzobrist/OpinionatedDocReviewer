@@ -244,3 +244,21 @@ class DocumentPermission(Base):
 
     document: Mapped[Document] = relationship("Document", back_populates="permissions")
     user: Mapped[User] = relationship("User", back_populates="permissions")
+
+
+class AdminActionLog(Base):
+    __tablename__ = "admin_action_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    actor_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), index=True, default=None
+    )
+    actor_email: Mapped[str | None] = mapped_column(String(320), default=None)
+    action: Mapped[str] = mapped_column(String(120), index=True)
+    target_type: Mapped[str] = mapped_column(String(80))
+    target_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    details: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )

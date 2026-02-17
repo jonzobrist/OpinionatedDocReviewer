@@ -191,6 +191,16 @@ export type AdminOverview = {
   };
   in_progress_jobs: AdminJobRead[];
   recent_jobs: AdminJobRead[];
+  recent_actions?: Array<{
+    id: number;
+    actor_user_id: number | null;
+    actor_email: string | null;
+    action: string;
+    target_type: string;
+    target_id: number | null;
+    details: string | null;
+    created_at: string;
+  }>;
 };
 
 export type MetaCommentSourceRead = {

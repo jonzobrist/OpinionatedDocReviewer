@@ -69,6 +69,18 @@ type AgentDraft = {
   is_active: boolean;
   group_id: number | null;
 };
+type AgentBundleImport = {
+  schema_version: string;
+  personas: unknown[];
+  file_name: string;
+};
+type AgentImportResult = {
+  created: number;
+  updated: number;
+  renamed: number;
+  skipped: number;
+  errors: string[];
+};
 
 function MermaidDiagram({ chart }: { chart: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -181,6 +193,12 @@ function HomePageContent() {
   const [agentDraft, setAgentDraft] = useState<AgentDraft>(() => createEmptyAgentDraft());
   const [isAgentSaving, setIsAgentSaving] = useState(false);
   const [agentBusyId, setAgentBusyId] = useState<number | null>(null);
+  const [agentImportConflictPolicy, setAgentImportConflictPolicy] = useState<
+    'skip' | 'overwrite' | 'rename'
+  >('rename');
+  const [pendingAgentImport, setPendingAgentImport] = useState<AgentBundleImport | null>(null);
+  const [agentImportPreview, setAgentImportPreview] = useState<AgentImportResult | null>(null);
+  const [isAgentImporting, setIsAgentImporting] = useState(false);
   const lastPollRef = useRef<number>(Date.now());
   const commentsRef = useRef<CommentRead[]>([]);
   const commentSignatureRef = useRef('');
@@ -192,6 +210,7 @@ function HomePageContent() {
   const cardRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const hoveredCommentIdRef = useRef<number | null>(null);
   const handledRouteIntentRef = useRef<string | null>(null);
+  const importAgentsInputRef = useRef<HTMLInputElement | null>(null);
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -252,6 +271,11 @@ function HomePageContent() {
     setEditingPersonaId(first.id);
     setAgentDraft(createDraftFromPersona(first));
   }, [showAgents, personas, editingPersonaId, isCreatingAgent]);
+
+  useEffect(() => {
+    if (!showAgents || !pendingAgentImport) return;
+    void refreshAgentImportPreview(pendingAgentImport);
+  }, [agentImportConflictPolicy]);
 
   useEffect(() => {
     if (!selectedVersionId) return;
@@ -325,12 +349,6 @@ function HomePageContent() {
       void refreshAdminData();
     }
   }, [showAdmin]);
-
-  useEffect(() => {
-    if (!showAdmin) return;
-    if (!selectedPermissionDocumentId) return;
-    void loadAdminPermissions(selectedPermissionDocumentId);
-  }, [showAdmin, selectedPermissionDocumentId]);
 
   useEffect(() => {
     if (!statusMessage) return;
@@ -414,21 +432,20 @@ function HomePageContent() {
     }
   }
 
-  async function loadAdminPermissions(documentId?: number | null) {
+  async function loadAdminPermissions() {
     try {
-      const query = documentId ? `?document_id=${documentId}` : '';
-      const permissions = await apiFetch<DocumentPermissionRead[]>(`/admin/permissions${query}`);
+      const permissions = await apiFetch<DocumentPermissionRead[]>('/admin/permissions');
       setAdminPermissions(Array.isArray(permissions) ? permissions : []);
     } catch (error) {
       setErrorMessage(normalizeError(error));
     }
   }
 
-  async function refreshAdminData(documentId?: number | null) {
+  async function refreshAdminData() {
     await Promise.all([
       loadAdminOverview(),
       loadAdminUsers(),
-      loadAdminPermissions(documentId ?? selectedPermissionDocumentId)
+      loadAdminPermissions()
     ]);
   }
 
@@ -823,6 +840,86 @@ function HomePageContent() {
     void refreshAll();
   }
 
+  async function handleExportAgents() {
+    try {
+      const bundle = await apiFetch<{
+        schema_version: string;
+        exported_at: string;
+        personas: unknown[];
+      }>('/personas/bundle/export');
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      downloadFile(
+        `agent-pack-${stamp}.json`,
+        JSON.stringify(bundle, null, 2),
+        'application/json;charset=utf-8'
+      );
+      setStatusMessage('Agent pack exported.');
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
+  }
+
+  async function runAgentImport(bundle: AgentBundleImport, dry_run: boolean) {
+    return apiFetch<AgentImportResult>('/personas/bundle/import', {
+      method: 'POST',
+      body: JSON.stringify({
+        schema_version: bundle.schema_version ?? 'v1',
+        conflict_policy: agentImportConflictPolicy,
+        dry_run,
+        personas: bundle.personas ?? []
+      })
+    });
+  }
+
+  async function refreshAgentImportPreview(bundle: AgentBundleImport) {
+    setIsAgentImporting(true);
+    try {
+      const preview = await runAgentImport(bundle, true);
+      setAgentImportPreview(preview);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+      setAgentImportPreview(null);
+    } finally {
+      setIsAgentImporting(false);
+    }
+  }
+
+  async function handleApplyAgentImport() {
+    if (!pendingAgentImport) return;
+    setIsAgentImporting(true);
+    try {
+      const result = await runAgentImport(pendingAgentImport, false);
+      await refreshAll();
+      setStatusMessage(
+        `Import complete: created ${result.created}, updated ${result.updated}, renamed ${result.renamed}, skipped ${result.skipped}.`
+      );
+      setPendingAgentImport(null);
+      setAgentImportPreview(null);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setIsAgentImporting(false);
+    }
+  }
+
+  async function handleImportAgentsFromFile(file: File) {
+    try {
+      const text =
+        typeof file.text === 'function' ? await file.text() : await new Response(file).text();
+      const parsed = JSON.parse(text);
+      const bundle: AgentBundleImport = {
+        schema_version: parsed.schema_version ?? 'v1',
+        personas: parsed.personas ?? [],
+        file_name: file.name
+      };
+      setPendingAgentImport(bundle);
+      await refreshAgentImportPreview(bundle);
+      setStatusMessage('Import preview ready. Review counts and apply when ready.');
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    }
+  }
+
   async function handleCreateAdminUser() {
     if (!newAdminUser.name.trim() || !newAdminUser.email.trim()) {
       setErrorMessage('User name and email are required.');
@@ -888,7 +985,7 @@ function HomePageContent() {
         })
       });
       setStatusMessage('Permission upserted.');
-      await refreshAdminData(selectedPermissionDocumentId);
+      await refreshAdminData();
     } catch (error) {
       setErrorMessage(normalizeError(error));
     }
@@ -903,7 +1000,7 @@ function HomePageContent() {
         method: 'PATCH',
         body: JSON.stringify({ permission_level })
       });
-      await refreshAdminData(selectedPermissionDocumentId);
+      await refreshAdminData();
     } catch (error) {
       setErrorMessage(normalizeError(error));
     }
@@ -912,7 +1009,7 @@ function HomePageContent() {
   async function handleDeletePermission(permissionId: number) {
     try {
       await apiFetch<null>(`/admin/permissions/${permissionId}`, { method: 'DELETE' });
-      await refreshAdminData(selectedPermissionDocumentId);
+      await refreshAdminData();
     } catch (error) {
       setErrorMessage(normalizeError(error));
     }
@@ -1208,6 +1305,11 @@ function HomePageContent() {
     const query = librarySearch.trim().toLowerCase();
     return filteredLibrary.filter((entry) => entry.title.toLowerCase().includes(query));
   }, [filteredLibrary, librarySearch]);
+
+  const visibleAdminPermissions = useMemo(() => {
+    if (!selectedPermissionDocumentId) return adminPermissions;
+    return adminPermissions.filter((perm) => perm.document_id === selectedPermissionDocumentId);
+  }, [adminPermissions, selectedPermissionDocumentId]);
 
   const filteredMetaComments = useMemo(() => {
     const comments = metaReviewRun?.comments ?? [];
@@ -2505,6 +2607,29 @@ function HomePageContent() {
                 </div>
               </div>
               <div className="agents-actions">
+                <button className="ghost-button" type="button" onClick={() => void handleExportAgents()}>
+                  Export
+                </button>
+                <select
+                  className="input compact"
+                  value={agentImportConflictPolicy}
+                  onChange={(event) =>
+                    setAgentImportConflictPolicy(
+                      event.target.value as 'skip' | 'overwrite' | 'rename'
+                    )
+                  }
+                >
+                  <option value="rename">import: rename conflicts</option>
+                  <option value="overwrite">import: overwrite conflicts</option>
+                  <option value="skip">import: skip conflicts</option>
+                </select>
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => importAgentsInputRef.current?.click()}
+                >
+                  Import
+                </button>
                 <button className="ghost-button" type="button" onClick={handleCreateAgent}>
                   New Agent
                 </button>
@@ -2520,7 +2645,58 @@ function HomePageContent() {
                   {isAgentSaving ? 'Saving...' : isCreatingAgent ? 'Create Agent' : 'Save Agent'}
                 </button>
               </div>
+              <input
+                ref={importAgentsInputRef}
+                type="file"
+                accept="application/json,.json"
+                style={{ display: 'none' }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) {
+                    void handleImportAgentsFromFile(file);
+                  }
+                  event.target.value = '';
+                }}
+              />
             </div>
+
+            {pendingAgentImport && (
+              <div className="agent-import-preview">
+                <div className="drawer-title">Import Preview: {pendingAgentImport.file_name}</div>
+                {isAgentImporting && <div className="subtle">Running dry-run preview…</div>}
+                {agentImportPreview && (
+                  <div className="meta-tags">
+                    <span className="meta-pill">create {agentImportPreview.created}</span>
+                    <span className="meta-pill">update {agentImportPreview.updated}</span>
+                    <span className="meta-pill">rename {agentImportPreview.renamed}</span>
+                    <span className="meta-pill">skip {agentImportPreview.skipped}</span>
+                    {agentImportPreview.errors.length > 0 && (
+                      <span className="meta-pill">errors {agentImportPreview.errors.length}</span>
+                    )}
+                  </div>
+                )}
+                <div className="agents-actions">
+                  <button
+                    className="primary-button"
+                    type="button"
+                    disabled={isAgentImporting}
+                    onClick={() => void handleApplyAgentImport()}
+                  >
+                    Apply Import
+                  </button>
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => {
+                      setPendingAgentImport(null);
+                      setAgentImportPreview(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="agents-workspace">
               <aside className="agents-list">
@@ -2944,7 +3120,12 @@ function HomePageContent() {
                   className="input"
                   value={selectedPermissionDocumentId ?? ''}
                   onChange={(event) => {
-                    const value = Number(event.target.value);
+                    const rawValue = event.target.value;
+                    if (!rawValue) {
+                      setSelectedPermissionDocumentId(null);
+                      return;
+                    }
+                    const value = Number(rawValue);
                     setSelectedPermissionDocumentId(Number.isFinite(value) ? value : null);
                   }}
                 >
@@ -2993,7 +3174,7 @@ function HomePageContent() {
                   </button>
                 </div>
                 <div className="history-list">
-                  {adminPermissions.map((perm) => (
+                  {visibleAdminPermissions.map((perm) => (
                     <div key={perm.id} className="history-item">
                       <div>
                         <div className="history-msg">
@@ -3024,6 +3205,67 @@ function HomePageContent() {
                           Remove
                         </button>
                       </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="admin-card wide">
+                <div className="drawer-title">Permission Matrix</div>
+                {adminUsers.length === 0 || libraryEntries.length === 0 ? (
+                  <div className="subtle">Add users and documents to view matrix.</div>
+                ) : (
+                  <div className="admin-matrix-wrap">
+                    <table className="admin-matrix">
+                      <thead>
+                        <tr>
+                          <th>User</th>
+                          {libraryEntries.slice(0, 8).map((entry) => (
+                            <th key={`head-${entry.id}`}>{entry.title}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminUsers.map((user) => (
+                          <tr key={`row-${user.id}`}>
+                            <td>{user.name}</td>
+                            {libraryEntries.slice(0, 8).map((entry) => {
+                              const perm = adminPermissions.find(
+                                (item) => item.user_id === user.id && item.document_id === entry.id
+                              );
+                              return (
+                                <td key={`cell-${user.id}-${entry.id}`}>
+                                  <span className="meta-pill">{perm?.permission_level ?? '—'}</span>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+
+              <section className="admin-card wide">
+                <div className="drawer-title">Recent Admin Actions</div>
+                <div className="history-list">
+                  {(adminOverview?.recent_actions ?? []).length === 0 && (
+                    <div className="subtle">No admin actions logged yet.</div>
+                  )}
+                  {(adminOverview?.recent_actions ?? []).map((action) => (
+                    <div key={action.id} className="history-item">
+                      <div>
+                        <div className="history-msg">
+                          {action.action} · {action.target_type}
+                          {action.target_id ? ` #${action.target_id}` : ''}
+                        </div>
+                        <div className="history-time">
+                          {action.actor_email ?? 'unknown'} ·{' '}
+                          {new Date(action.created_at).toLocaleString()}
+                        </div>
+                      </div>
+                      <span className="pill">{action.details ?? ''}</span>
                     </div>
                   ))}
                 </div>

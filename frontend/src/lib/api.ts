@@ -34,9 +34,19 @@ export function setTenantId(value: string) {
 }
 
 export function buildHeaders() {
+  const tenant = getTenantId();
+  let userEmail: string | null = null;
+  if (typeof window !== 'undefined') {
+    userEmail = window.localStorage.getItem('odr_user_email');
+    if (!userEmail) {
+      userEmail = `admin+${tenant}@local`;
+      window.localStorage.setItem('odr_user_email', userEmail);
+    }
+  }
   return {
     'Content-Type': 'application/json',
-    'X-Tenant-Id': getTenantId()
+    'X-Tenant-Id': tenant,
+    ...(userEmail ? { 'X-User-Email': userEmail } : {})
   };
 }
 
