@@ -161,3 +161,53 @@ def test_meta_review_guardrail_too_many_comments(client, monkeypatch) -> None:
         headers=headers,
     )
     assert resp.status_code == 422
+
+
+def test_meta_review_falls_back_when_selected_review_job_has_no_comments(client, monkeypatch) -> None:
+    headers = {"X-Tenant-Id": "tenant-meta-fallback-job"}
+    version, job = _seed_review_data(client, headers)
+    later_job = client.post(
+        "/api/review-jobs",
+        json={"document_version_id": version["id"], "trigger": "manual"},
+        headers=headers,
+    ).json()
+    monkeypatch.setattr(
+        "app.reviews.meta_reviewer.generate_completion",
+        lambda _: json.dumps(
+            [
+                {
+                    "content": "Tighten security details for token validation.",
+                    "category": "security",
+                    "priority": "high",
+                    "contributing_reviewers": ["A"],
+                    "location": {"start_offset": 0, "end_offset": 20},
+                }
+            ]
+        ),
+    )
+    resp = client.post(
+        "/api/meta-reviews",
+        json={"document_version_id": version["id"], "review_job_id": later_job["id"], "force": True},
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["review_job_id"] is None
+    assert len(body["comments"]) == 1
+
+
+def test_meta_review_returns_422_when_no_comments_exist(client) -> None:
+    headers = {"X-Tenant-Id": "tenant-meta-empty"}
+    doc = client.post("/api/documents", json={"title": "Doc"}, headers=headers).json()
+    version = client.post(
+        f"/api/documents/{doc['id']}/versions",
+        json={"version_label": "v1", "content": "alpha beta gamma"},
+        headers=headers,
+    ).json()
+    resp = client.post(
+        "/api/meta-reviews",
+        json={"document_version_id": version["id"], "force": True},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    assert "No reviewer comments available yet" in resp.json()["detail"]

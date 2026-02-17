@@ -253,13 +253,31 @@ def run_meta_review(
     force: bool = False,
 ) -> models.MetaReviewRun:
     started = time.perf_counter()
+    effective_review_job_id = review_job_id
     query = db.query(models.Comment).filter(
         models.Comment.tenant_id == tenant_id,
         models.Comment.document_version_id == document_version_id,
     )
-    if review_job_id is not None:
-        query = query.filter(models.Comment.review_job_id == review_job_id)
+    if effective_review_job_id is not None:
+        query = query.filter(models.Comment.review_job_id == effective_review_job_id)
     comments = query.order_by(models.Comment.id.asc()).all()
+
+    # If the selected run has no anchored comments yet, fall back to the full
+    # version comment set so Meta view still works for users.
+    if not comments and effective_review_job_id is not None:
+        effective_review_job_id = None
+        comments = (
+            db.query(models.Comment)
+            .filter(
+                models.Comment.tenant_id == tenant_id,
+                models.Comment.document_version_id == document_version_id,
+            )
+            .order_by(models.Comment.id.asc())
+            .all()
+        )
+
+    if not comments:
+        raise ValueError("No reviewer comments available yet for meta synthesis.")
 
     if len(comments) > MAX_META_COMMENTS_INPUT:
         raise ValueError(
@@ -273,7 +291,7 @@ def run_meta_review(
             .filter(
                 models.MetaReviewRun.tenant_id == tenant_id,
                 models.MetaReviewRun.document_version_id == document_version_id,
-                models.MetaReviewRun.review_job_id == review_job_id,
+                models.MetaReviewRun.review_job_id == effective_review_job_id,
                 models.MetaReviewRun.input_hash == input_hash,
             )
             .order_by(models.MetaReviewRun.id.desc())
@@ -285,7 +303,7 @@ def run_meta_review(
     run = models.MetaReviewRun(
         tenant_id=tenant_id,
         document_version_id=document_version_id,
-        review_job_id=review_job_id,
+        review_job_id=effective_review_job_id,
         input_hash=input_hash,
         status="running",
         is_synthesized=True,
@@ -370,7 +388,7 @@ def run_meta_review(
             "meta_review_failed tenant=%s version=%s review_job=%s input_hash=%s error=%s",
             tenant_id,
             document_version_id,
-            review_job_id,
+            effective_review_job_id,
             input_hash,
             exc,
         )
@@ -381,7 +399,7 @@ def run_meta_review(
             "meta_review_completed tenant=%s version=%s review_job=%s groups=%s source_comments=%s synthesized=%s duration_ms=%s",
             tenant_id,
             document_version_id,
-            review_job_id,
+            effective_review_job_id,
             len(groups),
             len(comments),
             synthesized_all,

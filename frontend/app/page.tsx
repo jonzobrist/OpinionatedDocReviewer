@@ -530,7 +530,6 @@ function HomePageContent() {
     markRecent: boolean,
     reviewJobId?: number | null
   ): Promise<CommentRead[]> {
-    setErrorMessage(null);
     try {
       const query = reviewJobId ? `&review_job_id=${reviewJobId}` : '';
       const data = await apiFetch<CommentRead[]>(`/comments?document_version_id=${versionId}${query}`);
@@ -574,6 +573,11 @@ function HomePageContent() {
         try {
           const latest = await apiFetch<MetaReviewRunRead>(query);
           setMetaReviewRun(latest);
+          setStatusMessage(
+            latest.comments.length > 0
+              ? `Meta review loaded (${latest.comments.length} directives).`
+              : 'No meta directives yet. Run review first, then recompute meta.'
+          );
           return latest;
         } catch (error) {
           const message = normalizeError(error);
@@ -591,9 +595,18 @@ function HomePageContent() {
         })
       });
       setMetaReviewRun(created);
+      setStatusMessage(
+        created.comments.length > 0
+          ? `Meta review ready (${created.comments.length} directives).`
+          : 'No meta directives produced for this version.'
+      );
       return created;
     } catch (error) {
-      setErrorMessage(normalizeError(error));
+      const message = normalizeError(error);
+      setErrorMessage(message);
+      if (message.toLowerCase().includes('no reviewer comments available yet')) {
+        setStatusMessage('Meta review is waiting for reviewer comments to arrive.');
+      }
       return null;
     } finally {
       setIsMetaLoading(false);
@@ -672,7 +685,10 @@ function HomePageContent() {
 
   async function handleBulkArchive(archived: boolean) {
     const ids = Array.from(selectedLibraryIds);
-    if (ids.length === 0) return;
+    if (ids.length === 0) {
+      setStatusMessage('Select one or more documents first.');
+      return;
+    }
     setErrorMessage(null);
     try {
       setBulkProgress({ label: archived ? 'Archiving' : 'Restoring', done: 0, total: ids.length });
@@ -700,7 +716,10 @@ function HomePageContent() {
 
   async function handleBulkDelete() {
     const ids = Array.from(selectedLibraryIds);
-    if (ids.length === 0) return;
+    if (ids.length === 0) {
+      setStatusMessage('Select one or more documents first.');
+      return;
+    }
     const confirmed = window.confirm(`Delete ${ids.length} selected documents permanently?`);
     if (!confirmed) return;
     setErrorMessage(null);
@@ -734,7 +753,10 @@ function HomePageContent() {
     const targets = filteredLibraryWithSearch.filter(
       (entry) => selectedLibraryIds.has(entry.id) && Boolean(entry.latest_version_id)
     );
-    if (targets.length === 0) return;
+    if (targets.length === 0) {
+      setStatusMessage('Select documents with at least one version to re-run review.');
+      return;
+    }
     const confirmed = window.confirm(`Queue re-review for ${targets.length} selected document(s)?`);
     if (!confirmed) return;
     setErrorMessage(null);
@@ -2116,11 +2138,12 @@ function HomePageContent() {
                     <button
                       className="ghost-button"
                       type="button"
+                      disabled={isMetaLoading}
                       onClick={() =>
                         void loadOrCreateMetaReview(selectedVersion.id, selectedReviewJobId, true)
                       }
                     >
-                      Recompute
+                      {isMetaLoading ? 'Computing…' : 'Recompute'}
                     </button>
                   </>
                 )}
@@ -3701,16 +3724,36 @@ function formatCommentBody(comment: CommentRead): string {
   if (!excerpt) return raw;
 
   // Hide inline duplicated source text from feedback cards while keeping it discoverable via details.
-  const withoutExactExcerpt = raw.replace(excerpt, '').trim();
+  const withoutExactExcerpt = raw
+    .replace(excerpt, '')
+    .replace(`"${excerpt}"`, '')
+    .replace(`'${excerpt}'`, '')
+    .trim();
   const normalizedExcerpt = excerpt.replace(/^["'`]+|["'`]+$/g, '').trim();
   const withoutNormalizedExcerpt =
     withoutExactExcerpt === raw
       ? raw.replace(normalizedExcerpt, '').trim()
       : withoutExactExcerpt;
 
-  const cleaned = withoutNormalizedExcerpt
-    .replace(/^(quote|quoted text|excerpt|source)\s*:\s*/i, '')
-    .replace(/^\-\s*(quote|quoted text|excerpt|source)\s*:\s*/i, '')
+  const cleanedLines = withoutNormalizedExcerpt
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => {
+      const compact = line
+        .replace(/^[-*]\s*/, '')
+        .replace(/^(quote|quoted text|excerpt|source|text|snippet)\s*:\s*/i, '')
+        .replace(/^["'`]+|["'`]+$/g, '')
+        .trim();
+      if (!compact) return false;
+      return compact.toLowerCase() !== normalizedExcerpt.toLowerCase();
+    });
+
+  const cleaned = cleanedLines
+    .join('\n')
+    .replace(/^(quote|quoted text|excerpt|source|text|snippet)\s*:\s*/i, '')
+    .replace(/^\-\s*(quote|quoted text|excerpt|source|text|snippet)\s*:\s*/i, '')
+    .replace(/^[-:;,\s]+/, '')
     .trim();
 
   return cleaned || raw;
