@@ -80,7 +80,14 @@ Frontend:
 
 ```bash
 cd frontend
-npm test -- --run
+bun run test
+```
+
+Browser smoke (Chrome/Chromium nav + panel checks):
+
+```bash
+cd frontend
+bun run test:smoke
 ```
 
 ## Environment

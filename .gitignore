@@ -10,6 +10,8 @@ __pycache__/
 
 # Test artifacts
 .pytest_cache/
+test-results/
+playwright-report/
 
 # Local DB
 app.db
