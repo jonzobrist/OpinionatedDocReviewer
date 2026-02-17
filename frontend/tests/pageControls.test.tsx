@@ -99,6 +99,30 @@ describe('page controls', () => {
       }
       if (url.endsWith('/documents/library')) return json(documentLibraryPayload);
       if (url.endsWith('/documents')) return json([]);
+      if (url.endsWith('/documents/101/history')) {
+        return json([
+          {
+            sha: 'abcdef1234567',
+            message: 'Update design notes',
+            authored_at: new Date().toISOString()
+          }
+        ]);
+      }
+      if (url.endsWith('/review-jobs')) {
+        return json([
+          {
+            id: 501,
+            tenant_id: 'local-dev',
+            document_version_id: 401,
+            status: 'completed',
+            trigger: 'upload',
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            completed_at: new Date().toISOString(),
+            created_at: new Date().toISOString()
+          }
+        ]);
+      }
       if (url.endsWith('/personas') && (!init || init.method === 'GET')) return json(personasPayload);
       if (url.endsWith('/personas') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body || '{}'));
@@ -345,6 +369,14 @@ describe('page controls', () => {
     expect((await screen.findAllByText('Design Notes')).length).toBeGreaterThan(0);
     expect(await screen.findByText('level=viewer')).toBeTruthy();
     expect(await screen.findByText('permission.update · permission #1')).toBeTruthy();
+  });
+
+  it('opens history overlay from route', async () => {
+    mockPathname = '/history';
+    render(<HomePage />);
+    expect(await screen.findByText('Review Runs')).toBeTruthy();
+    expect(await screen.findByText('Document Commits')).toBeTruthy();
+    expect(await screen.findByText('Update design notes')).toBeTruthy();
   });
 
   it('previews and applies agent import bundle', async () => {
