@@ -85,6 +85,17 @@ class Settings(BaseSettings):
     CORS_ALLOW_METHODS: str = "*"
     CORS_ALLOW_HEADERS: str = "*"
     CORS_MAX_AGE: int = 600
+    AUTH_MODE: str = "oidc"
+    DEFAULT_TENANT_ID: str = "local-dev"
+    OIDC_ISSUER_URL: str | None = None
+    OIDC_JWKS_URL: str | None = None
+    OIDC_AUDIENCE: str | None = None
+    OIDC_ALGORITHMS: str = "RS256"
+    OIDC_TENANT_CLAIM: str = "tid"
+    OIDC_EMAIL_CLAIM: str = "email"
+    OIDC_NAME_CLAIM: str = "name"
+    OIDC_ROLES_CLAIM: str = "roles"
+    OIDC_ADMIN_ROLE: str = "admin"
 
     model_config = SettingsConfigDict(
         env_file=(

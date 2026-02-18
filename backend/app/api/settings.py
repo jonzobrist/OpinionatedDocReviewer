@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_tenant_id
+from app.api.deps import get_tenant_id, require_admin_user
 from app.core.config import save_config_values, settings
 from app.schemas.settings import SystemConfigRead, SystemConfigUpdate
 
-router = APIRouter(prefix="/settings", tags=["settings"])
+router = APIRouter(
+    prefix="/settings",
+    tags=["settings"],
+    dependencies=[Depends(require_admin_user)],
+)
 
 
 def _bool_set(value: str | None) -> bool:

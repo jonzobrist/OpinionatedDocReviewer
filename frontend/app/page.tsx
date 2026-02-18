@@ -18,8 +18,10 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   apiFetch,
   DEFAULT_TENANT,
+  getAccessToken,
   getApiBase,
   getTenantId,
+  setAccessToken,
   setApiBase,
   setTenantId
 } from '../src/lib/api';
@@ -131,6 +133,7 @@ function MermaidDiagram({ chart }: { chart: string }) {
 function HomePageContent() {
   const [apiBase, setApiBaseState] = useState('');
   const [tenantId, setTenantIdState] = useState('');
+  const [accessToken, setAccessTokenState] = useState('');
 
   const [documents, setDocuments] = useState<DocumentRead[]>([]);
   const [libraryEntries, setLibraryEntries] = useState<DocumentLibraryEntry[]>([]);
@@ -251,6 +254,7 @@ function HomePageContent() {
   useEffect(() => {
     setApiBaseState(getApiBase());
     setTenantIdState(getTenantId());
+    setAccessTokenState(getAccessToken());
     setAgentThemes(loadAgentThemes());
   }, []);
 
@@ -898,6 +902,7 @@ function HomePageContent() {
   function handleTenantSave() {
     setTenantId(tenantId || DEFAULT_TENANT);
     setApiBase(apiBase || 'http://localhost:8006/api');
+    setAccessToken(accessToken);
     setStatusMessage('Connection settings saved.');
     void refreshAll();
   }
@@ -3815,6 +3820,14 @@ function HomePageContent() {
                     value={tenantId}
                     onChange={(event) => setTenantIdState(event.target.value)}
                     placeholder={DEFAULT_TENANT}
+                  />
+                  <div className="spacer" />
+                  <label className="subtle">OIDC/JWT Access Token</label>
+                  <input
+                    className="input"
+                    value={accessToken}
+                    onChange={(event) => setAccessTokenState(event.target.value)}
+                    placeholder="Paste bearer token (stored in localStorage)"
                   />
                   <div className="spacer" />
                   <button className="ghost-button" type="button" onClick={handleTenantSave}>

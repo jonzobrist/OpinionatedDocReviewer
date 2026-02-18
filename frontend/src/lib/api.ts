@@ -33,8 +33,23 @@ export function setTenantId(value: string) {
   window.localStorage.setItem('odr_tenant_id', value);
 }
 
+export function getAccessToken() {
+  if (typeof window === 'undefined') return '';
+  return window.localStorage.getItem('odr_access_token') ?? '';
+}
+
+export function setAccessToken(value: string) {
+  if (typeof window === 'undefined') return;
+  if (value.trim()) {
+    window.localStorage.setItem('odr_access_token', value.trim());
+    return;
+  }
+  window.localStorage.removeItem('odr_access_token');
+}
+
 export function buildHeaders() {
   const tenant = getTenantId();
+  const token = getAccessToken();
   let userEmail: string | null = null;
   if (typeof window !== 'undefined') {
     userEmail = window.localStorage.getItem('odr_user_email');
@@ -46,6 +61,7 @@ export function buildHeaders() {
   return {
     'Content-Type': 'application/json',
     'X-Tenant-Id': tenant,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(userEmail ? { 'X-User-Email': userEmail } : {})
   };
 }

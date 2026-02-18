@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api.deps import get_db
+from app.core.config import settings
 from app.db.models import Base
 from app.main import create_app
 
@@ -19,7 +20,8 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 
 
 @pytest.fixture()
-def client():
+def client(monkeypatch):
+    monkeypatch.setattr(settings, "AUTH_MODE", "header")
     Base.metadata.create_all(bind=engine)
 
     def override_get_db():

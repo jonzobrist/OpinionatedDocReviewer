@@ -99,6 +99,35 @@ Do not commit secrets.
 - Or configure via `backend/.env` / `backend/config.toml` (examples in `backend/.env.example` and `backend/config.example.toml`).
 - CORS is configurable in backend env/config; see `PRODUCT.md`.
 
+## Authentication (OIDC/JWT)
+
+Backend supports two auth modes:
+
+- `AUTH_MODE=oidc` (recommended for production)
+- `AUTH_MODE=header` (legacy/dev compatibility)
+
+OIDC settings (`backend/.env` or `backend/config.toml`):
+
+```env
+AUTH_MODE=oidc
+OIDC_ISSUER_URL=https://<your-issuer>
+OIDC_AUDIENCE=<your-api-audience>
+OIDC_JWKS_URL=https://<your-issuer>/.well-known/jwks.json
+OIDC_TENANT_CLAIM=tid
+OIDC_EMAIL_CLAIM=email
+OIDC_NAME_CLAIM=name
+OIDC_ROLES_CLAIM=roles
+OIDC_ADMIN_ROLE=admin
+```
+
+Frontend:
+
+- Open `System` → `Client Connection`
+- Paste JWT into `OIDC/JWT Access Token`
+- Click `Save Connection`
+
+The frontend sends `Authorization: Bearer <token>` on all API requests.
+
 ## Agent Import/Export Packs
 
 Agent Studio supports structured portability for reviewer configs:
