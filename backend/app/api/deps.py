@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.db import models
 from app.db.init_db import seed_default_admin_user
 from app.db.session import SessionLocal
+from app.security.tenant import validate_tenant_id
 
 
 def get_db():
@@ -106,7 +107,7 @@ def _auth_context_from_headers(
 ) -> AuthContext:
     if not x_tenant_id:
         raise HTTPException(status_code=400, detail="X-Tenant-Id header required")
-    tenant_id = x_tenant_id
+    tenant_id = validate_tenant_id(x_tenant_id)
     seed_default_admin_user(tenant_id=tenant_id, db=db)
     query = db.query(models.User).filter(models.User.tenant_id == tenant_id)
     if x_user_id:
@@ -131,9 +132,10 @@ def _auth_context_from_oidc(
 ) -> AuthContext:
     token = _extract_bearer_token(authorization)
     claims = decode_access_token(token)
-    tenant_id = _claim_str(claims, settings.OIDC_TENANT_CLAIM, settings.DEFAULT_TENANT_ID)
-    if not tenant_id:
+    tenant_claim = _claim_str(claims, settings.OIDC_TENANT_CLAIM, settings.DEFAULT_TENANT_ID)
+    if not tenant_claim:
         raise HTTPException(status_code=401, detail="Tenant claim missing in token")
+    tenant_id = validate_tenant_id(tenant_claim)
     email = _claim_str(claims, settings.OIDC_EMAIL_CLAIM)
     if not email:
         sub = _claim_str(claims, "sub")

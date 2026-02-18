@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "OpinionatedDocReviewer API"
     APP_VERSION: str = "0.1.0"
     API_PREFIX: str = "/api"
-    DATABASE_URL: str = "sqlite:///./app.db"
+    DATABASE_URL: str = f"sqlite:///{(Path(__file__).resolve().parents[3] / '.run' / 'app.db')}"
     PORT: int = 8006
     REDIS_URL: str = "redis://localhost:6379/0"
     REVIEW_QUEUE_NAME: str = "review-jobs"
@@ -82,9 +82,12 @@ class Settings(BaseSettings):
     )
     CORS_ALLOW_ORIGIN_REGEX: str | None = None
     CORS_ALLOW_CREDENTIALS: bool = False
-    CORS_ALLOW_METHODS: str = "*"
-    CORS_ALLOW_HEADERS: str = "*"
+    CORS_ALLOW_METHODS: str = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+    CORS_ALLOW_HEADERS: str = "Authorization,Content-Type,X-Tenant-Id,X-User-Email,X-User-Id"
     CORS_MAX_AGE: int = 600
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+    RATE_LIMIT_MAX_REQUESTS: int = 180
     AUTH_MODE: str = "oidc"
     DEFAULT_TENANT_ID: str = "local-dev"
     OIDC_ISSUER_URL: str | None = None

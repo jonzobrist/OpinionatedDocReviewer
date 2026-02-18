@@ -4,12 +4,20 @@ import os
 import subprocess
 from pathlib import Path
 
+from fastapi import HTTPException
+
 from app.core.config import settings
+from app.security.tenant import validate_tenant_id
 
 
 def ensure_repo(tenant_id: str, document_id: int) -> Path:
-    root = Path(settings.DOC_REPO_ROOT).expanduser()
-    repo_path = root / tenant_id / f"doc-{document_id}"
+    if document_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid document id")
+    safe_tenant_id = validate_tenant_id(tenant_id)
+    root = Path(settings.DOC_REPO_ROOT).expanduser().resolve()
+    repo_path = (root / safe_tenant_id / f"doc-{document_id}").resolve()
+    if not repo_path.is_relative_to(root):
+        raise HTTPException(status_code=400, detail="Invalid repository path")
     repo_path.mkdir(parents=True, exist_ok=True)
     git_dir = repo_path / ".git"
     if not git_dir.exists():

@@ -4,6 +4,7 @@ import uvicorn
 from app.api.routes import api_router
 from app.core.config import settings
 from app.db.init_db import init_db
+from app.middleware.rate_limit import SimpleRateLimitMiddleware
 
 def create_app(init_db_on_startup: bool = True) -> FastAPI:
     app = FastAPI(
@@ -23,6 +24,7 @@ def create_app(init_db_on_startup: bool = True) -> FastAPI:
         allow_headers=settings.cors_allow_headers_list,
         max_age=settings.CORS_MAX_AGE,
     )
+    app.add_middleware(SimpleRateLimitMiddleware)
 
     app.include_router(api_router, prefix=settings.API_PREFIX)
 
@@ -40,7 +42,7 @@ def run() -> None:
         "app.main:app",
         host="0.0.0.0",
         port=settings.PORT,
-        reload=True,
+        reload=False,
     )
 
 

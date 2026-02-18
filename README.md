@@ -128,6 +128,12 @@ Frontend:
 
 The frontend sends `Authorization: Bearer <token>` on all API requests.
 
+Security defaults now enabled:
+
+- Rate limiting middleware is on by default (`RATE_LIMIT_ENABLED=true`)
+- CORS defaults are explicit (no wildcard methods/headers)
+- Default SQLite path is under `.run/app.db` (not project root)
+
 ## Agent Import/Export Packs
 
 Agent Studio supports structured portability for reviewer configs:
