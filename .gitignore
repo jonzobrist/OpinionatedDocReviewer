@@ -28,3 +28,4 @@ backend/.venv/
 .DS_Store
 .env
 backend/.env
+agents_local/

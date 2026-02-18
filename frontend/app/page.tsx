@@ -966,9 +966,13 @@ function HomePageContent() {
 
   async function handleImportAgentsFromFile(file: File) {
     try {
-      const text =
+      const rawText =
         typeof file.text === 'function' ? await file.text() : await new Response(file).text();
+      const text = rawText.replace(/^\uFEFF/, '').trim();
       const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.personas)) {
+        throw new Error('Invalid agent bundle: expected JSON object with a personas array.');
+      }
       const bundle: AgentBundleImport = {
         schema_version: parsed.schema_version ?? 'v1',
         personas: parsed.personas ?? [],
@@ -978,7 +982,7 @@ function HomePageContent() {
       await refreshAgentImportPreview(bundle);
       setStatusMessage('Import preview ready. Review counts and apply when ready.');
     } catch (error) {
-      setErrorMessage(normalizeError(error));
+      setErrorMessage(`Import failed: ${normalizeError(error)}`);
     }
   }
 
@@ -2834,15 +2838,22 @@ function HomePageContent() {
                 <div className="drawer-title">Import Preview: {pendingAgentImport.file_name}</div>
                 {isAgentImporting && <div className="subtle">Running dry-run preview…</div>}
                 {agentImportPreview && (
-                  <div className="meta-tags">
-                    <span className="meta-pill">create {agentImportPreview.created}</span>
-                    <span className="meta-pill">update {agentImportPreview.updated}</span>
-                    <span className="meta-pill">rename {agentImportPreview.renamed}</span>
-                    <span className="meta-pill">skip {agentImportPreview.skipped}</span>
+                  <>
+                    <div className="meta-tags">
+                      <span className="meta-pill">create {agentImportPreview.created}</span>
+                      <span className="meta-pill">update {agentImportPreview.updated}</span>
+                      <span className="meta-pill">rename {agentImportPreview.renamed}</span>
+                      <span className="meta-pill">skip {agentImportPreview.skipped}</span>
+                      {agentImportPreview.errors.length > 0 && (
+                        <span className="meta-pill">errors {agentImportPreview.errors.length}</span>
+                      )}
+                    </div>
                     {agentImportPreview.errors.length > 0 && (
-                      <span className="meta-pill">errors {agentImportPreview.errors.length}</span>
+                      <div className="subtle">
+                        {agentImportPreview.errors.join(' | ')}
+                      </div>
                     )}
-                  </div>
+                  </>
                 )}
                 <div className="agents-actions">
                   <button
