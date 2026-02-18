@@ -102,6 +102,7 @@ class Settings(BaseSettings):
     OIDC_NAME_CLAIM: str = "name"
     OIDC_ROLES_CLAIM: str = "roles"
     OIDC_ADMIN_ROLE: str = "admin"
+    OIDC_ALLOW_LOCAL_HEADER_FALLBACK: bool = True
 
     model_config = SettingsConfigDict(
         env_file=(

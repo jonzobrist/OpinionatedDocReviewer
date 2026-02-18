@@ -3,9 +3,17 @@ from app.core.config import settings
 
 def test_oidc_requires_bearer_for_api_access(client, monkeypatch) -> None:
     monkeypatch.setattr(settings, "AUTH_MODE", "oidc")
+    monkeypatch.setattr(settings, "OIDC_ALLOW_LOCAL_HEADER_FALLBACK", False)
     resp = client.get("/api/documents")
     assert resp.status_code == 401
     assert "bearer token" in resp.json()["detail"].lower()
+
+
+def test_oidc_allows_local_header_fallback(client, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "AUTH_MODE", "oidc")
+    monkeypatch.setattr(settings, "OIDC_ALLOW_LOCAL_HEADER_FALLBACK", True)
+    resp = client.get("/api/documents", headers={"X-Tenant-Id": "local-dev"})
+    assert resp.status_code == 200
 
 
 def test_oidc_claims_create_user_and_scope_tenant(client, monkeypatch) -> None:

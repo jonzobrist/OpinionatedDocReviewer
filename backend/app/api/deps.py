@@ -153,6 +153,11 @@ def _auth_context_from_oidc(
     return AuthContext(tenant_id=tenant_id, user=user, claims=claims)
 
 
+def _is_local_request(request: Request) -> bool:
+    host = request.client.host if request.client else ""
+    return host in {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
 def get_auth_context(
     request: Request,
     db: Session = Depends(get_db),
@@ -166,7 +171,19 @@ def get_auth_context(
         return cached
     mode = settings.AUTH_MODE.strip().lower()
     if mode == "oidc":
-        context = _auth_context_from_oidc(db=db, authorization=authorization)
+        if (
+            not authorization
+            and settings.OIDC_ALLOW_LOCAL_HEADER_FALLBACK
+            and _is_local_request(request)
+        ):
+            context = _auth_context_from_headers(
+                db=db,
+                x_tenant_id=x_tenant_id,
+                x_user_email=x_user_email,
+                x_user_id=x_user_id,
+            )
+        else:
+            context = _auth_context_from_oidc(db=db, authorization=authorization)
     elif mode == "header":
         context = _auth_context_from_headers(
             db=db,

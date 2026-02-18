@@ -118,6 +118,7 @@ OIDC_EMAIL_CLAIM=email
 OIDC_NAME_CLAIM=name
 OIDC_ROLES_CLAIM=roles
 OIDC_ADMIN_ROLE=admin
+OIDC_ALLOW_LOCAL_HEADER_FALLBACK=true
 ```
 
 Frontend:
@@ -127,6 +128,8 @@ Frontend:
 - Click `Save Connection`
 
 The frontend sends `Authorization: Bearer <token>` on all API requests.
+
+For local development convenience, `OIDC_ALLOW_LOCAL_HEADER_FALLBACK=true` allows localhost requests without a bearer token to continue using legacy header identity. Set this to `false` in stricter environments.
 
 Security defaults now enabled:
 
