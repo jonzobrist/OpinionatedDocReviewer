@@ -55,10 +55,10 @@
 - [x] Add API route to reset built-in agents to baseline defaults without deleting user agents.
 
 ### Phase 2: Review Engine Integration
-- [ ] Update prompt builder to include new persona fields consistently.
-- [ ] Enforce `output_requirements` in prompt and parser fallback behavior.
-- [ ] Persist per-comment metadata indicating which output rule was applied/violated.
-- [ ] Add safety guards for oversized reference notes/examples.
+- [x] Update prompt builder to include new persona fields consistently.
+- [x] Enforce `output_requirements` in prompt and parser fallback behavior.
+- [x] Persist per-comment metadata indicating which output rule was applied/violated.
+- [x] Add safety guards for oversized reference notes/examples.
 
 ### Phase 3: Full CRUD UI for Agents
 - [ ] Build `/agents` as full management page (not just drawer):

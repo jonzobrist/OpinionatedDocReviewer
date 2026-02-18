@@ -14,6 +14,7 @@ def create_comment(db: Session, tenant_id: str, data: CommentCreate) -> models.C
         start_offset=data.start_offset,
         end_offset=data.end_offset,
         excerpt=data.excerpt,
+        output_metadata=data.output_metadata or {},
     )
     db.add(comment)
     db.commit()

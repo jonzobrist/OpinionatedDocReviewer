@@ -8,7 +8,7 @@ from app.db.init_db import seed_default_personas
 from app.db.session import SessionLocal
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout, as_completed
-from app.reviews.parsing import parse_bullets, persist_comment_payloads
+from app.reviews.parsing import parse_review_output, persist_comment_payloads, normalize_output_requirements, ParsedComment
 from app.reviews.git_repo import ensure_repo
 from app.reviews.review_storage import write_review_and_commit
 from datetime import datetime, timezone
@@ -71,6 +71,9 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
                 "system_prompt": persona.system_prompt,
                 "focus_areas": persona.focus_areas,
                 "tone": persona.tone,
+                "reference_notes": persona.reference_notes,
+                "output_requirements": persona.output_requirements,
+                "examples": persona.examples,
             }
             for persona in personas
         ]
@@ -87,7 +90,8 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
             for future in as_completed(future_map):
                 spec = future_map[future]
                 try:
-                    comments = future.result()
+                    comments = _normalize_parsed_comments(future.result(), spec.get("output_requirements"))
+                    comment_texts = [entry.text for entry in comments]
                     persist_comments(
                         db,
                         tenant_id,
@@ -101,22 +105,32 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
                         {
                             "persona_id": spec["id"],
                             "persona_name": spec["name"],
-                            "comments": comments,
+                            "comments": comment_texts,
+                            "output_metadata": [entry.output_metadata for entry in comments],
                         }
                     )
                     print(
-                        f"[review] Persona {spec['id']} completed ({len(comments)} comments)",
+                        f"[review] Persona {spec['id']} completed ({len(comment_texts)} comments)",
                         flush=True,
                     )
                 except Exception as exc:
                     print(f"[review] Persona {spec['id']} failed: {exc}", flush=True)
+                    failure = ParsedComment(
+                        text=f"Review failed: {exc}",
+                        output_metadata={
+                            "requirements": normalize_output_requirements(spec.get("output_requirements")),
+                            "violations": ["review_failed"],
+                            "used_fallback": True,
+                            "truncated": False,
+                        },
+                    )
                     persist_comments(
                         db,
                         tenant_id,
                         version.id,
                         spec["id"],
                         review_job_id,
-                        [f"Review failed: {exc}"],
+                        [failure],
                         version.content,
                     )
                     results.append(
@@ -124,6 +138,7 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
                             "persona_id": spec["id"],
                             "persona_name": spec["name"],
                             "comments": [f"Review failed: {exc}"],
+                            "output_metadata": [failure.output_metadata],
                             "error": str(exc),
                         }
                     )
@@ -168,7 +183,7 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
         db.close()
 
 
-def generate_comments(persona: models.Persona, content: str) -> list[str]:
+def generate_comments(persona: models.Persona, content: str) -> list[ParsedComment]:
     return generate_comments_for_spec(
         {
             "id": persona.id,
@@ -177,12 +192,15 @@ def generate_comments(persona: models.Persona, content: str) -> list[str]:
             "system_prompt": persona.system_prompt,
             "focus_areas": persona.focus_areas,
             "tone": persona.tone,
+            "reference_notes": persona.reference_notes,
+            "output_requirements": persona.output_requirements,
+            "examples": persona.examples,
         },
         content,
     )
 
 
-def generate_comments_for_spec(persona: dict, content: str) -> list[str]:
+def generate_comments_for_spec(persona: dict, content: str) -> list[ParsedComment]:
     prompt = build_prompt(
         persona["name"],
         persona.get("description"),
@@ -190,6 +208,9 @@ def generate_comments_for_spec(persona: dict, content: str) -> list[str]:
         persona.get("focus_areas"),
         persona.get("tone"),
         trim_content(content),
+        persona.get("reference_notes"),
+        persona.get("output_requirements"),
+        persona.get("examples"),
     )
     start = time.time()
     print(
@@ -202,7 +223,7 @@ def generate_comments_for_spec(persona: dict, content: str) -> list[str]:
         f"[review] {get_provider_name()} call took {time.time() - start:.2f}s",
         flush=True,
     )
-    return parse_bullets(text)
+    return parse_review_output(text, persona.get("output_requirements"))
 
 
 def _generate_with_timeout_retry(prompt: str) -> str:
@@ -236,6 +257,9 @@ def build_prompt(
     focus_areas: list[str] | None,
     tone: str | None,
     content: str,
+    reference_notes: str | None = None,
+    output_requirements: dict | None = None,
+    examples: list[str] | None = None,
 ) -> str:
     clean_focus_areas = []
     for item in focus_areas or []:
@@ -247,21 +271,65 @@ def build_prompt(
     focus = ", ".join(clean_focus_areas) if clean_focus_areas else "general quality"
     voice = tone or "direct and constructive"
     summary = description or ""
-    return (
-        "You are a document review persona.\n"
-        f"Name: {name}\n"
-        f"Description: {summary}\n"
-        f"System prompt: {system_prompt or ''}\n"
-        f"Focus areas: {focus}\n"
-        f"Tone: {voice}\n\n"
-        "Review the document below and provide exactly 4 concise bullet comments.\n"
-        "Every bullet MUST include an exact excerpt from the document in double quotes.\n"
-        "Format each bullet exactly as:\n"
-        "- \"<exact excerpt from document>\" :: <actionable comment>\n"
-        "Do not output any bullet without a quoted excerpt.\n\n"
-        "Document:\n"
-        f"{content}"
+    requirements = normalize_output_requirements(output_requirements)
+    max_bullets = requirements["max_bullets"]
+    include_severity = requirements["include_severity"]
+
+    sections = [
+        "You are a document review persona.",
+        f"Name: {name}",
+        f"Description: {summary}",
+        f"System prompt: {system_prompt or ''}",
+        f"Focus areas: {focus}",
+        f"Tone: {voice}",
+        "",
+        "Output requirements:",
+        f"- Format: {requirements['format']}",
+        f"- Max bullets: {max_bullets}",
+    ]
+    if requirements["require_quote_excerpt"]:
+        sections.append("- Each bullet must include an exact excerpt from the document in double quotes.")
+    if requirements["require_actionable"]:
+        sections.append("- Each bullet must include an actionable recommendation.")
+    if include_severity:
+        sections.append("- Prefix each bullet with a severity tag: [low], [medium], or [high].")
+
+    if requirements["format"] == "bullet_list":
+        example_prefix = "- [high] \"<exact excerpt>\" :: <actionable comment>" if include_severity else "- \"<exact excerpt>\" :: <actionable comment>"
+        sections.extend(
+            [
+                "Use Markdown bullets that start with '- '.",
+                f"Example: {example_prefix}",
+            ]
+        )
+    else:
+        sections.append("Provide a single response matching the required format above.")
+
+    if reference_notes:
+        truncated_notes, notes_truncated = _truncate_section(reference_notes, 2000)
+        sections.append("")
+        sections.append("Reference notes (always consider):")
+        sections.append(truncated_notes)
+        if notes_truncated:
+            sections.append("(Reference notes were truncated to 2000 characters.)")
+
+    if examples:
+        trimmed_examples, examples_truncated = _truncate_examples(examples, 3, 2000)
+        if trimmed_examples:
+            sections.append("")
+            sections.append("Examples:")
+            sections.extend(trimmed_examples)
+            if examples_truncated:
+                sections.append("(Examples were truncated to fit size limits.)")
+
+    sections.extend(
+        [
+            "",
+            "Document:",
+            content,
+        ]
     )
+    return "\n".join(sections)
 
 
 def trim_content(content: str) -> str:
@@ -270,16 +338,69 @@ def trim_content(content: str) -> str:
     return content[: settings.OPENAI_MAX_INPUT_CHARS]
 
 
+def _truncate_section(text: str, max_chars: int) -> tuple[str, bool]:
+    if len(text) <= max_chars:
+        return text, False
+    return text[:max_chars].rstrip(), True
+
+
+def _truncate_examples(examples: list[str], max_count: int, max_total_chars: int) -> tuple[list[str], bool]:
+    trimmed: list[str] = []
+    total = 0
+    truncated = False
+    for example in examples[:max_count]:
+        if example is None:
+            continue
+        text = str(example).strip()
+        if not text:
+            continue
+        remaining = max_total_chars - total
+        if remaining <= 0:
+            truncated = True
+            break
+        if len(text) > remaining:
+            text = text[:remaining].rstrip()
+            truncated = True
+        total += len(text)
+        trimmed.append(f"- {text}")
+    if len(examples) > max_count:
+        truncated = True
+    return trimmed, truncated
+
+
+def _normalize_parsed_comments(raw_comments: list[ParsedComment] | list[str], output_requirements: dict | None) -> list[ParsedComment]:
+    if not raw_comments:
+        return []
+    normalized: list[ParsedComment] = []
+    requirements = normalize_output_requirements(output_requirements)
+    for entry in raw_comments:
+        if isinstance(entry, ParsedComment):
+            normalized.append(entry)
+            continue
+        normalized.append(
+            ParsedComment(
+                text=str(entry),
+                output_metadata={
+                    "requirements": requirements,
+                    "violations": ["unstructured_output"],
+                    "used_fallback": True,
+                    "truncated": False,
+                },
+            )
+        )
+    return normalized
+
+
 def persist_comments(
     db: Session,
     tenant_id: str,
     version_id: int,
     persona_id: int,
     review_job_id: int,
-    comments: list[str],
+    comments: list[ParsedComment],
     content: str,
 ) -> None:
-    for comment, excerpt, start, end in persist_comment_payloads(comments, content):
+    for comment, excerpt, start, end, output_metadata in persist_comment_payloads(comments, content):
         db.add(
             models.Comment(
                 tenant_id=tenant_id,
@@ -290,6 +411,7 @@ def persist_comments(
                 start_offset=start,
                 end_offset=end,
                 excerpt=excerpt,
+                output_metadata=output_metadata or {},
             )
         )
     db.commit()

@@ -11,6 +11,7 @@ class CommentBase(BaseModel):
     start_offset: int = Field(ge=0)
     end_offset: int = Field(ge=0)
     excerpt: str | None = Field(default=None, max_length=1000)
+    output_metadata: dict | None = None
 
 
 class CommentCreate(CommentBase):

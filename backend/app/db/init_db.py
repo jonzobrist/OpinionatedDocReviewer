@@ -271,6 +271,12 @@ def _ensure_schema() -> None:
         )
         _ensure_column(
             connection,
+            "comments",
+            "output_metadata",
+            "JSON",
+        )
+        _ensure_column(
+            connection,
             "documents",
             "is_archived",
             "BOOLEAN DEFAULT 0",
@@ -299,6 +305,9 @@ def _ensure_schema() -> None:
         )
         connection.execute(
             text("UPDATE documents SET is_archived=0 WHERE is_archived IS NULL")
+        )
+        connection.execute(
+            text("UPDATE comments SET output_metadata='{}' WHERE output_metadata IS NULL OR output_metadata=''")
         )
         connection.execute(
             text("UPDATE personas SET output_requirements='{}' WHERE output_requirements IS NULL OR output_requirements=''")

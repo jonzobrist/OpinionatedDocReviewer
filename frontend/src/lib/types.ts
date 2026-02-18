@@ -116,6 +116,7 @@ export type CommentRead = {
   start_offset: number;
   end_offset: number;
   excerpt: string | null;
+  output_metadata?: Record<string, unknown> | null;
   created_at: string;
 };
 
