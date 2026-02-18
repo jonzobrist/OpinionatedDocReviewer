@@ -28,4 +28,9 @@ backend/.venv/
 .DS_Store
 .env
 backend/.env
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
 agents_local/

@@ -8,6 +8,28 @@ RUN_DIR="$ROOT_DIR/.run"
 LOG_DIR="$RUN_DIR/logs"
 UV_CACHE_DIR="$RUN_DIR/uv-cache"
 
+load_env_file() {
+  local file="$1"
+  if [ ! -f "$file" ]; then
+    return 0
+  fi
+  # Load dotenv-style key/value pairs so start/restart scripts honor local runtime config.
+  set -a
+  set +u
+  # shellcheck disable=SC1090
+  source "$file"
+  set -u
+  set +a
+}
+
+# Load repo-level env first, then backend env for service-specific overrides.
+if [ -f "$ROOT_DIR/.env" ]; then
+  load_env_file "$ROOT_DIR/.env"
+fi
+if [ -f "$BACKEND_DIR/.env" ]; then
+  load_env_file "$BACKEND_DIR/.env"
+fi
+
 PORT="${PORT:-}"
 if [ -z "$PORT" ] && [ -f "$BACKEND_DIR/.env" ]; then
   PORT=$(grep -E '^PORT=' "$BACKEND_DIR/.env" | tail -n1 | cut -d= -f2 || true)
