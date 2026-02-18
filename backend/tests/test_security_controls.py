@@ -26,3 +26,15 @@ def test_rate_limit_blocks_excess_requests(client, monkeypatch) -> None:
     second = client.get("/api/status")
     assert first.status_code == 200
     assert second.status_code == 429
+
+
+def test_csrf_origin_guard_blocks_untrusted_origin(client, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "CSRF_ENFORCE_ORIGIN", True)
+    monkeypatch.setattr(settings, "CORS_ALLOW_ORIGINS", "https://allowed.example")
+    headers = {
+        "X-Tenant-Id": "tenant-csrf",
+        "Origin": "https://evil.example",
+    }
+    response = client.post("/api/documents", json={"title": "Doc"}, headers=headers)
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Origin not allowed"

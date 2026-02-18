@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 
@@ -9,6 +11,7 @@ from app.reviews.meta_reviewer import run_meta_review
 from app.schemas.meta_review import MetaReviewCreate, MetaReviewRunRead
 
 router = APIRouter(prefix="/meta-reviews", tags=["meta-reviews"])
+logger = logging.getLogger(__name__)
 
 
 def _load_run(
@@ -53,7 +56,13 @@ def create_meta_review(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Meta synthesis failed: {exc}") from exc
+        logger.exception(
+            "meta_synthesis_failed tenant_id=%s document_version_id=%s review_job_id=%s",
+            tenant_id,
+            payload.document_version_id,
+            payload.review_job_id,
+        )
+        raise HTTPException(status_code=503, detail="Meta synthesis failed") from exc
     loaded = _load_run(db, tenant_id, run.id)
     if not loaded:
         raise HTTPException(status_code=500, detail="Failed to load synthesized run")

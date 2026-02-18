@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_MAX_TOKENS: int = 700
     OPENAI_MAX_INPUT_CHARS: int = 12000
+    DOC_MAX_CHARS: int = 500000
+    COMMENT_MAX_CHARS: int = 4000
     OPENAI_TEMPERATURE: float = 0.2
     OPENAI_TIMEOUT_SECONDS: int = 30
     BEDROCK_MODEL_ID: str = "anthropic.claude-3-5-haiku-20241022-v1:0"
@@ -85,6 +87,7 @@ class Settings(BaseSettings):
     CORS_ALLOW_METHODS: str = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
     CORS_ALLOW_HEADERS: str = "Authorization,Content-Type,X-Tenant-Id,X-User-Email,X-User-Id"
     CORS_MAX_AGE: int = 600
+    CSRF_ENFORCE_ORIGIN: bool = True
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_WINDOW_SECONDS: int = 60
     RATE_LIMIT_MAX_REQUESTS: int = 180

@@ -1,3 +1,6 @@
+from app.core.config import settings
+
+
 def test_document_and_versions_crud(client) -> None:
     headers = {"X-Tenant-Id": "tenant-a"}
 
@@ -74,3 +77,15 @@ def test_document_and_versions_crud(client) -> None:
 
     get_missing = client.get(f"/api/documents/{doc_id}", headers=headers)
     assert get_missing.status_code == 404
+
+
+def test_document_version_content_size_limit(client) -> None:
+    headers = {"X-Tenant-Id": "tenant-limit"}
+    doc = client.post("/api/documents", json={"title": "Small doc"}, headers=headers).json()
+    oversize = "x" * (settings.DOC_MAX_CHARS + 1)
+    response = client.post(
+        f"/api/documents/{doc['id']}/versions",
+        json={"version_label": "v1", "content": oversize},
+        headers=headers,
+    )
+    assert response.status_code == 422

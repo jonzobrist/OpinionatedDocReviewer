@@ -4,6 +4,7 @@ import uvicorn
 from app.api.routes import api_router
 from app.core.config import settings
 from app.db.init_db import init_db
+from app.middleware.csrf_guard import CsrfOriginGuardMiddleware
 from app.middleware.rate_limit import SimpleRateLimitMiddleware
 
 def create_app(init_db_on_startup: bool = True) -> FastAPI:
@@ -25,6 +26,7 @@ def create_app(init_db_on_startup: bool = True) -> FastAPI:
         max_age=settings.CORS_MAX_AGE,
     )
     app.add_middleware(SimpleRateLimitMiddleware)
+    app.add_middleware(CsrfOriginGuardMiddleware)
 
     app.include_router(api_router, prefix=settings.API_PREFIX)
 

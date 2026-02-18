@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -16,6 +18,7 @@ from app.core.config import settings
 from app.schemas.review_job import ReviewJobCreate, ReviewJobRead
 
 router = APIRouter(prefix="/review-jobs", tags=["review-jobs"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=list[ReviewJobRead])
@@ -67,7 +70,8 @@ def create(
             return job
         job.status = "failed"
         db.commit()
-        raise HTTPException(status_code=503, detail=f"Failed to enqueue review job: {exc}")
+        logger.exception("enqueue_review_job_failed review_job_id=%s tenant_id=%s", job.id, tenant_id)
+        raise HTTPException(status_code=503, detail="Failed to enqueue review job")
 
     if settings.REVIEW_INLINE:
         run_review_job(job.id, tenant_id)
@@ -100,7 +104,13 @@ def retry_persona(
     try:
         added = retry_failed_persona_in_job(review_job_id, tenant_id, persona_id)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Retry failed: {exc}") from exc
+        logger.exception(
+            "retry_failed_persona_error review_job_id=%s persona_id=%s tenant_id=%s",
+            review_job_id,
+            persona_id,
+            tenant_id,
+        )
+        raise HTTPException(status_code=503, detail="Retry failed") from exc
     if added == 0:
         raise HTTPException(status_code=404, detail="Persona or document context not found")
     return {"status": "retried", "review_job_id": review_job_id, "persona_id": persona_id, "comments_added": added}
