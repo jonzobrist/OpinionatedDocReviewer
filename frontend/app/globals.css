@@ -232,7 +232,7 @@ main {
   width: 100%;
   height: 100%;
   pointer-events: none;
-  z-index: 8;
+  z-index: 110;
   overflow: visible;
 }
 
@@ -248,6 +248,11 @@ main {
   filter: drop-shadow(0 0 10px rgba(15, 24, 34, 0.4));
 }
 
+.link-path.dimmed {
+  opacity: 0.18;
+  filter: drop-shadow(0 0 1px rgba(15, 24, 34, 0.08));
+}
+
 .doc-panel,
 .feed-panel {
   background: var(--surface-1);
@@ -257,6 +262,15 @@ main {
   padding: 20px;
   position: relative;
   z-index: 3;
+}
+
+.doc-panel {
+  z-index: 20;
+}
+
+.feed-panel {
+  z-index: 90;
+  margin-right: clamp(14px, 2vw, 28px);
 }
 
 .doc-header {
@@ -408,6 +422,10 @@ main {
   transform: scale(1.01);
 }
 
+.view-highlight.selected {
+  transform: none;
+}
+
 .feed-header {
   display: flex;
   justify-content: space-between;
@@ -418,11 +436,11 @@ main {
 .feed-panel {
   display: flex;
   flex-direction: column;
-  height: auto;
-  max-height: none;
-  position: relative;
-  top: auto;
-  z-index: 40;
+  height: calc(100vh - 120px);
+  max-height: calc(100vh - 120px);
+  position: sticky;
+  top: 88px;
+  z-index: 80;
   overflow: visible;
 }
 
@@ -446,10 +464,14 @@ main {
 .feed-list {
   display: grid;
   gap: 12px;
-  flex: 0 0 auto;
-  overflow: visible;
-  padding: 16px 18px 56px 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: visible;
+  padding: 16px 46px 72px 10px;
   margin: 0 -8px -10px -4px;
+  position: relative;
+  z-index: 120;
 }
 
 .comment-card {
@@ -486,7 +508,7 @@ main {
 
 .comment-card.selected {
   box-shadow: 0 0 0 3px rgba(29, 138, 122, 0.48), 0 26px 44px rgba(15, 24, 34, 0.24);
-  z-index: 120;
+  z-index: 220;
 }
 
 .comment-card.dimmed {
@@ -498,6 +520,41 @@ main {
 .comment-card.error {
   background: rgba(183, 72, 47, 0.09);
   box-shadow: 0 0 0 1px rgba(183, 72, 47, 0.24), 0 8px 18px rgba(15, 24, 34, 0.08);
+}
+
+.comment-card.ghost-active {
+  opacity: 0.01;
+  filter: none;
+  box-shadow: none;
+}
+
+.comment-float-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  isolation: isolate;
+  z-index: 2147483646 !important;
+}
+
+.comment-float-card {
+  position: fixed;
+  margin: 0;
+  max-width: min(760px, calc(100vw - 36px));
+  background: var(--surface-2);
+  border-radius: 14px;
+  padding: 14px;
+  border-left: 4px solid var(--accent-500);
+  box-shadow: 0 0 0 3px rgba(29, 138, 122, 0.48), 0 26px 44px rgba(15, 24, 34, 0.24);
+  z-index: 2147483647 !important;
+  will-change: left, top, width;
+}
+
+.comment-source-preview {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ink-500);
+  border-top: 1px dashed var(--surface-3);
+  padding-top: 8px;
 }
 
 .comment-zoom-layer {
@@ -1325,6 +1382,84 @@ main {
   padding: 14px;
 }
 
+.system-card-span {
+  grid-column: span 2;
+}
+
+.system-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.queue-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.queue-stat {
+  border: 1px solid var(--surface-3);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 8px;
+}
+
+.queue-stat-value {
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.worker-list {
+  display: grid;
+  gap: 8px;
+}
+
+.worker-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px dashed var(--surface-3);
+  padding: 8px 0;
+}
+
+.worker-row:last-child {
+  border-bottom: 0;
+}
+
+.worker-log-list {
+  display: grid;
+  gap: 8px;
+  max-height: 330px;
+  overflow: auto;
+}
+
+.worker-log-row {
+  border: 1px solid var(--surface-3);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.worker-log-row.error {
+  border-color: rgba(192, 58, 43, 0.3);
+}
+
+.worker-log-row.warn {
+  border-color: rgba(207, 111, 26, 0.32);
+}
+
+.worker-log-detail {
+  margin-top: 6px;
+  white-space: pre-wrap;
+}
+
 .system-secret-row {
   display: flex;
   justify-content: space-between;
@@ -1572,6 +1707,12 @@ main {
   }
   .system-grid {
     grid-template-columns: 1fr;
+  }
+  .system-card-span {
+    grid-column: auto;
+  }
+  .queue-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .admin-overlay {
     position: static;

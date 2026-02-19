@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 let mockPathname = '/';
+let mockSearchParams = new URLSearchParams();
 const pushMock = vi.fn((next: string) => {
   mockPathname = next;
 });
@@ -12,7 +13,7 @@ const pushMock = vi.fn((next: string) => {
 vi.mock('next/navigation', () => ({
   usePathname: () => mockPathname,
   useRouter: () => ({ push: pushMock, replace: vi.fn() }),
-  useSearchParams: () => ({ get: () => null })
+  useSearchParams: () => ({ get: (key: string) => mockSearchParams.get(key) })
 }));
 
 import HomePage from '../app/page';
@@ -27,6 +28,7 @@ function json(data: unknown, status = 200) {
 describe('page controls', () => {
   beforeEach(() => {
     mockPathname = '/';
+    mockSearchParams = new URLSearchParams();
     pushMock.mockClear();
     const store = new Map<string, string>();
     Object.defineProperty(window, 'localStorage', {
@@ -108,7 +110,7 @@ describe('page controls', () => {
           }
         ]);
       }
-      if (url.endsWith('/review-jobs')) {
+      if (url.includes('/review-jobs') && (!init?.method || init.method === 'GET')) {
         return json([
           {
             id: 501,
@@ -119,6 +121,53 @@ describe('page controls', () => {
             provider: 'openai',
             model: 'gpt-4o-mini',
             completed_at: new Date().toISOString(),
+            created_at: new Date().toISOString()
+          }
+        ]);
+      }
+      if (url.endsWith('/review-jobs') && init?.method === 'POST') {
+        return json(
+          {
+            id: 777,
+            tenant_id: 'local-dev',
+            document_version_id: 401,
+            status: 'queued',
+            trigger: 'manual',
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            completed_at: null,
+            created_at: new Date().toISOString()
+          },
+          201
+        );
+      }
+      if (url.endsWith('/documents/101/versions')) {
+        return json([
+          {
+            id: 401,
+            tenant_id: 'local-dev',
+            document_id: 101,
+            version_label: 'Initial upload',
+            content: '# Design Notes',
+            created_at: new Date().toISOString()
+          }
+        ]);
+      }
+      if (url.includes('/comments?document_version_id=401&review_job_id=501')) {
+        return json([]);
+      }
+      if (url.includes('/comments?document_version_id=401') && !url.includes('review_job_id=')) {
+        return json([
+          {
+            id: 601,
+            tenant_id: 'local-dev',
+            persona_id: 1,
+            document_version_id: 401,
+            review_job_id: 500,
+            text: 'Clarify this section.',
+            start_offset: 0,
+            end_offset: 10,
+            excerpt: 'Design',
             created_at: new Date().toISOString()
           }
         ]);
@@ -204,6 +253,43 @@ describe('page controls', () => {
         });
       }
       if (url.endsWith('/health')) return json({ status: 'ok' });
+      if (url.endsWith('/admin/worker-monitor')) {
+        return json({
+          redis_ok: true,
+          redis_error: null,
+          queue: {
+            name: 'review-jobs',
+            queued: 1,
+            started: 1,
+            scheduled: 0,
+            deferred: 0,
+            failed: 0,
+            finished: 3
+          },
+          workers: [
+            {
+              name: 'worker-a',
+              state: 'busy',
+              queues: ['review-jobs'],
+              current_job_id: 'rq-123',
+              last_heartbeat: new Date().toISOString()
+            }
+          ],
+          logs: [
+            {
+              id: 'log-1',
+              timestamp: new Date().toISOString(),
+              level: 'info',
+              source: 'review',
+              message: 'Review job #501 is completed',
+              detail: null,
+              review_job_id: 501,
+              rq_job_id: null,
+              document_title: 'Design Notes'
+            }
+          ]
+        });
+      }
       if (url.endsWith('/admin/overview')) {
         return json({
           tenant_id: 'local-dev',
@@ -323,6 +409,31 @@ describe('page controls', () => {
     mockPathname = '/library';
     render(<HomePage />);
     expect(await screen.findByText('Review Ledger')).toBeTruthy();
+  });
+
+  it('routes brand logo to library', async () => {
+    render(<HomePage />);
+    const brand = await screen.findByRole('link', { name: /opinionated doc reviewer/i });
+    expect(brand.getAttribute('href')).toBe('/library');
+  });
+
+  it('refresh falls back to latest available comments when selected run is empty', async () => {
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams('doc=101');
+    render(<HomePage />);
+    const refresh = await screen.findByRole('button', { name: 'Refresh' });
+    fireEvent.click(refresh);
+    await screen.findByText(/Loaded 1 comments from latest available run\./i);
+
+    const calls = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((args) =>
+      String(args[0])
+    );
+    expect(calls.some((url) => url.includes('/comments?document_version_id=401&review_job_id=501'))).toBe(true);
+    expect(
+      calls.some(
+        (url) => url.includes('/comments?document_version_id=401') && !url.includes('review_job_id=')
+      )
+    ).toBe(true);
   });
 
   it('saves system settings to localStorage', async () => {

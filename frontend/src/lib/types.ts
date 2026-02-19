@@ -238,3 +238,41 @@ export type MetaReviewRunRead = {
   created_at: string;
   comments: MetaCommentRead[];
 };
+
+export type WorkerSnapshotRead = {
+  name: string;
+  state: string;
+  queues: string[];
+  current_job_id: string | null;
+  last_heartbeat: string | null;
+};
+
+export type WorkerQueueStatsRead = {
+  name: string;
+  queued: number;
+  started: number;
+  scheduled: number;
+  deferred: number;
+  failed: number;
+  finished: number;
+};
+
+export type WorkerLogEventRead = {
+  id: string;
+  timestamp: string;
+  level: 'info' | 'warn' | 'error' | string;
+  source: string;
+  message: string;
+  detail: string | null;
+  review_job_id: number | null;
+  rq_job_id: string | null;
+  document_title: string | null;
+};
+
+export type WorkerMonitorRead = {
+  redis_ok: boolean;
+  redis_error: string | null;
+  queue: WorkerQueueStatsRead;
+  workers: WorkerSnapshotRead[];
+  logs: WorkerLogEventRead[];
+};

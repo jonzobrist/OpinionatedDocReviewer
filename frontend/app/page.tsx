@@ -13,6 +13,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import JSZip from 'jszip';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -44,6 +45,7 @@ import {
   PersonaRead,
   ReviewJobRead,
   MetaReviewRunRead,
+  WorkerMonitorRead,
   SystemConfigRead,
   SystemStatus
 } from '../src/lib/types';
@@ -147,6 +149,8 @@ function HomePageContent() {
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [systemConfig, setSystemConfig] = useState<SystemConfigRead | null>(null);
+  const [workerMonitor, setWorkerMonitor] = useState<WorkerMonitorRead | null>(null);
+  const [isWorkerMonitorLoading, setIsWorkerMonitorLoading] = useState(false);
   const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null);
   const [adminUsers, setAdminUsers] = useState<AdminUserRead[]>([]);
   const [adminPermissions, setAdminPermissions] = useState<DocumentPermissionRead[]>([]);
@@ -215,6 +219,7 @@ function HomePageContent() {
   const markRefs = useRef<Record<number, HTMLElement | null>>({});
   const cardRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const hoveredCommentIdRef = useRef<number | null>(null);
+  const hoverAlignFrameRef = useRef<number | null>(null);
   const handledRouteIntentRef = useRef<string | null>(null);
   const importAgentsInputRef = useRef<HTMLInputElement | null>(null);
   const pathname = usePathname();
@@ -332,6 +337,25 @@ function HomePageContent() {
   }, [focusedCommentId]);
 
   useEffect(() => {
+    if (!hoveredCommentId || focusedCommentId) return;
+    if (hoverAlignFrameRef.current !== null) {
+      cancelAnimationFrame(hoverAlignFrameRef.current);
+    }
+    hoverAlignFrameRef.current = requestAnimationFrame(() => {
+      const mark = markRefs.current[hoveredCommentId];
+      const card = cardRefs.current[hoveredCommentId];
+      card?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      mark?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    });
+    return () => {
+      if (hoverAlignFrameRef.current !== null) {
+        cancelAnimationFrame(hoverAlignFrameRef.current);
+        hoverAlignFrameRef.current = null;
+      }
+    };
+  }, [hoveredCommentId, focusedCommentId]);
+
+  useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
       if (!focusedCommentId) return;
       const target = event.target as HTMLElement | null;
@@ -359,7 +383,16 @@ function HomePageContent() {
   useEffect(() => {
     if (showSettings) {
       void loadSystemConfig();
+      void loadWorkerMonitor();
     }
+  }, [showSettings]);
+
+  useEffect(() => {
+    if (!showSettings) return;
+    const interval = setInterval(() => {
+      void loadWorkerMonitor();
+    }, 5000);
+    return () => clearInterval(interval);
   }, [showSettings]);
 
   useEffect(() => {
@@ -425,6 +458,19 @@ function HomePageContent() {
       setSystemConfig(cfg);
     } catch (error) {
       setErrorMessage(normalizeError(error));
+    }
+  }
+
+  async function loadWorkerMonitor() {
+    setIsWorkerMonitorLoading(true);
+    try {
+      const monitor = await apiFetch<WorkerMonitorRead>('/admin/worker-monitor');
+      setWorkerMonitor(monitor);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+      setWorkerMonitor(null);
+    } finally {
+      setIsWorkerMonitorLoading(false);
     }
   }
 
@@ -546,27 +592,56 @@ function HomePageContent() {
     }
   }
 
-  async function loadReviewJobsSnapshot(versionId: number) {
+  async function loadReviewJobsSnapshot(versionId: number): Promise<{
+    jobs: ReviewJobRead[];
+    selectedId: number | null;
+  }> {
+    const currentSelected = selectedReviewJobId;
     try {
       const jobs = await apiFetch<ReviewJobRead[]>(`/review-jobs?document_version_id=${versionId}`);
       setReviewJobs(jobs);
       if (jobs.length === 0) {
         setSelectedReviewJobId(null);
-        return;
+        return { jobs, selectedId: null };
       }
+      let nextSelected = currentSelected;
       const selectedExists =
-        selectedReviewJobId !== null && jobs.some((job) => job.id === selectedReviewJobId);
+        currentSelected !== null && jobs.some((job) => job.id === currentSelected);
       if (!selectedExists) {
         const latest = jobs[jobs.length - 1];
-        setSelectedReviewJobId(latest?.id ?? null);
+        nextSelected = latest?.id ?? null;
+        setSelectedReviewJobId(nextSelected);
       }
       const running = jobs.some((job) => job.status === 'queued' || job.status === 'running');
       if (!running) {
         setIsReviewStarting(false);
       }
+      return { jobs, selectedId: nextSelected };
     } catch {
       // Snapshot polling should not surface transient errors in the primary UI flow.
+      return { jobs: [], selectedId: currentSelected };
     }
+  }
+
+  async function handleRefreshCurrentComments() {
+    if (!selectedVersion) return;
+    const snapshot = await loadReviewJobsSnapshot(selectedVersion.id);
+    const activeReviewJobId = snapshot.selectedId;
+    const scoped = await loadComments(selectedVersion.id, false, activeReviewJobId);
+    if (activeReviewJobId && scoped.length === 0) {
+      const fallback = await loadComments(selectedVersion.id, false, null);
+      setStatusMessage(
+        fallback.length > 0
+          ? `Loaded ${fallback.length} comments from latest available run.`
+          : 'No comments available yet for this version.'
+      );
+      return;
+    }
+    setStatusMessage(
+      scoped.length > 0
+        ? `Refreshed ${scoped.length} comments.`
+        : 'No comments available yet for this run.'
+    );
   }
 
   async function loadComments(
@@ -1405,6 +1480,15 @@ function HomePageContent() {
   }, [metaReviewRun, metaCategoryFilter]);
 
   const activeCommentId = focusedCommentId ?? hoveredCommentId;
+  const [floatingCardStyle, setFloatingCardStyle] = useState<{
+    left: number;
+    top: number;
+    width: number;
+  } | null>(null);
+  const floatingComment = useMemo(
+    () => visibleComments.find((comment) => comment.id === activeCommentId) ?? null,
+    [visibleComments, activeCommentId]
+  );
 
   useEffect(() => {
     hoveredCommentIdRef.current = hoveredCommentId;
@@ -1519,9 +1603,8 @@ function HomePageContent() {
 
         const span = document.createElement('span');
         span.dataset.odrViewHighlight = '1';
-        span.className = `doc-highlight view-highlight ${
-          activeCommentId === match.comment.id ? 'selected' : ''
-        }`;
+        span.className = 'doc-highlight view-highlight';
+        span.dataset.commentId = String(match.comment.id);
         span.style.backgroundColor = `${match.color}22`;
         span.style.borderBottomColor = match.color;
         span.addEventListener('click', () => focusComment(match.comment.id));
@@ -1549,9 +1632,20 @@ function HomePageContent() {
     anchoredComments,
     selectedVersion,
     personaMap,
-    agentThemes,
-    activeCommentId
+    agentThemes
   ]);
+
+  useEffect(() => {
+    const root = docBodyRef.current;
+    if (!root) return;
+    const highlights = root.querySelectorAll<HTMLElement>('span[data-odr-view-highlight="1"]');
+    highlights.forEach((node) => {
+      const raw = node.dataset.commentId;
+      const commentId = raw ? Number(raw) : Number.NaN;
+      const selected = Number.isFinite(commentId) && activeCommentId === commentId;
+      node.classList.toggle('selected', selected);
+    });
+  }, [activeCommentId, docMode, highlightTick]);
 
   const allFilteredSelected = useMemo(() => {
     if (filteredLibraryWithSearch.length === 0) return false;
@@ -1608,6 +1702,11 @@ function HomePageContent() {
       if (!workspace || !docPanel || !feedList) return;
 
       const workspaceRect = workspace.getBoundingClientRect();
+      const intersectsViewport = (rect: DOMRect, padding = 24) =>
+        rect.bottom >= -padding &&
+        rect.top <= window.innerHeight + padding &&
+        rect.right >= -padding &&
+        rect.left <= window.innerWidth + padding;
       const nextPaths: ConnectorPath[] = [];
 
       for (const comment of anchoredComments) {
@@ -1617,6 +1716,10 @@ function HomePageContent() {
 
         const from = mark.getBoundingClientRect();
         const to = card.getBoundingClientRect();
+        if (!intersectsViewport(to)) continue;
+        const verticalGap = Math.abs(to.top - from.top);
+        const maxVerticalGap = Math.max(window.innerHeight * 2.5, 1800);
+        if (verticalGap > maxVerticalGap) continue;
         const startX = from.right - workspaceRect.left + 6;
         const startY = from.top + from.height / 2 - workspaceRect.top;
         const endX = to.left - workspaceRect.left - 8;
@@ -1659,7 +1762,52 @@ function HomePageContent() {
       feed?.removeEventListener('scroll', onResize);
       doc?.removeEventListener('scroll', onResize);
     };
-  }, [anchoredComments, selectedVersion, personaMap, agentThemes, docMode, activeCommentId, highlightTick]);
+  }, [anchoredComments, selectedVersion, personaMap, agentThemes, docMode, highlightTick]);
+
+  useEffect(() => {
+    if (commentViewMode !== 'individual' || !activeCommentId) {
+      setFloatingCardStyle(null);
+      return;
+    }
+    const recalc = () => {
+      const card = cardRefs.current[activeCommentId];
+      if (!card) {
+        setFloatingCardStyle(null);
+        return;
+      }
+      const rect = card.getBoundingClientRect();
+      const margin = 18;
+      const topMargin = 82;
+      const scale = 1.55;
+      const width = Math.min(rect.width * scale, window.innerWidth - margin * 2);
+      const scaledHeight = rect.height * scale;
+      const left = Math.min(
+        window.innerWidth - width - margin,
+        Math.max(margin, rect.right - width)
+      );
+      const top = Math.min(
+        window.innerHeight - scaledHeight - margin,
+        Math.max(topMargin, rect.top + (rect.height - scaledHeight) / 2)
+      );
+      setFloatingCardStyle({ left, top, width });
+    };
+
+    const frame = requestAnimationFrame(recalc);
+    const onRecalc = () => requestAnimationFrame(recalc);
+    window.addEventListener('resize', onRecalc);
+    window.addEventListener('scroll', onRecalc, true);
+    const feed = feedListRef.current;
+    const doc = docPanelRef.current;
+    feed?.addEventListener('scroll', onRecalc);
+    doc?.addEventListener('scroll', onRecalc);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('resize', onRecalc);
+      window.removeEventListener('scroll', onRecalc, true);
+      feed?.removeEventListener('scroll', onRecalc);
+      doc?.removeEventListener('scroll', onRecalc);
+    };
+  }, [activeCommentId, commentViewMode, visibleComments, dockCenterIndex]);
 
   function updateAgentTheme(id: number, color: string, label?: string) {
     setAgentThemes((prev) => {
@@ -1897,7 +2045,7 @@ function HomePageContent() {
   return (
     <main>
       <div className="topbar">
-        <Link className="brand brand-link" href="/">
+        <Link className="brand brand-link" href="/library">
           <div className="logo">ODR</div>
           <div>
             <div className="brand-title">Opinionated Doc Reviewer</div>
@@ -1990,7 +2138,9 @@ function HomePageContent() {
                 key={item.id}
                 d={item.path}
                 stroke={item.color}
-                className={`link-path ${activeCommentId === item.id ? 'selected' : ''}`}
+                className={`link-path ${activeCommentId === item.id ? 'selected' : ''} ${
+                  activeCommentId && activeCommentId !== item.id ? 'dimmed' : ''
+                }`}
                 strokeWidth={2.4}
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -2200,7 +2350,7 @@ function HomePageContent() {
                   <button
                     className="ghost-button"
                     type="button"
-                    onClick={() => void loadComments(selectedVersion.id, false, selectedReviewJobId)}
+                    onClick={() => void handleRefreshCurrentComments()}
                   >
                     Refresh
                   </button>
@@ -2225,11 +2375,17 @@ function HomePageContent() {
                 const isFailure = comment.text.toLowerCase().startsWith('review failed:');
                 const distance =
                   dockCenterIndex >= 0 ? Math.abs(index - dockCenterIndex) : Number.POSITIVE_INFINITY;
+                const isFloatingActive =
+                  commentViewMode === 'individual' &&
+                  activeCommentId === comment.id &&
+                  floatingCardStyle !== null;
                 let scale = 1;
-                if (distance === 0) scale = 2;
-                else if (distance === 1) scale = 1.26;
+                if (distance === 0) scale = 1.55;
+                else if (distance === 1) scale = 1.2;
                 else if (distance === 2) scale = 1.08;
-                const shift = scale > 1 ? -Math.round((scale - 1) * 62) : 0;
+                if (isFloatingActive) scale = 1;
+                // Keep the focused card away from the browser edge while preserving in-pane layering.
+                const shift = isFloatingActive ? 0 : distance === 0 ? -12 : 0;
                 const zIndex = distance === 0 ? 140 : distance === 1 ? 80 : distance === 2 ? 48 : 1;
                 return (
                   <div
@@ -2242,7 +2398,7 @@ function HomePageContent() {
                       activeCommentId === comment.id ? 'selected' : ''
                     } ${activeCommentId && activeCommentId !== comment.id ? 'dimmed' : ''} ${
                       isFailure ? 'error' : ''
-                    }`}
+                    } ${isFloatingActive ? 'ghost-active' : ''}`}
                     style={{
                       borderLeftColor: color,
                       ['--dock-scale' as '--dock-scale']: scale,
@@ -2348,6 +2504,60 @@ function HomePageContent() {
                   );
                 })}
             </div>
+            {commentViewMode === 'individual' &&
+              floatingComment &&
+              floatingCardStyle &&
+              typeof document !== 'undefined' &&
+              createPortal(
+                <div className="comment-float-layer" aria-hidden="true">
+                  <div
+                    className="comment-float-card selected"
+                    style={
+                      {
+                        left: `${floatingCardStyle.left}px`,
+                        top: `${floatingCardStyle.top}px`,
+                        width: `${floatingCardStyle.width}px`,
+                        borderLeftColor:
+                          personaMap.get(floatingComment.persona_id)
+                            ? getThemeForPersona(
+                                agentThemes,
+                                floatingComment.persona_id,
+                                colorForPersona(floatingComment.persona_id)
+                              )
+                            : AGENT_COLORS[0]
+                      } as CSSProperties
+                    }
+                  >
+                    <div className="comment-head">
+                      <div className="comment-agent">
+                        <span
+                          className="agent-dot"
+                          style={{
+                            backgroundColor:
+                              personaMap.get(floatingComment.persona_id)
+                                ? getThemeForPersona(
+                                    agentThemes,
+                                    floatingComment.persona_id,
+                                    colorForPersona(floatingComment.persona_id)
+                                  )
+                                : AGENT_COLORS[0]
+                          }}
+                        />
+                        {personaMap.get(floatingComment.persona_id)?.name ??
+                          `Agent ${floatingComment.persona_id}`}
+                      </div>
+                      <span className="comment-time">
+                        {new Date(floatingComment.created_at).toLocaleTimeString()}
+                      </span>
+                    </div>
+                    <div className="comment-text">{formatCommentBody(floatingComment)}</div>
+                    {floatingComment.excerpt && (
+                      <div className="comment-source-preview">{floatingComment.excerpt}</div>
+                    )}
+                  </div>
+                </div>,
+                document.body
+              )}
             {showAgents && (
               <div className="drawer">
                 <div className="drawer-title">Agents</div>
@@ -3481,6 +3691,9 @@ function HomePageContent() {
                 >
                   LLM {systemStatus && (systemStatus.llm?.ok ?? systemStatus.openai.ok) ? 'OK' : 'Issue'}
                 </span>
+                <span className={`status-pill ${workerMonitor?.redis_ok ? 'ok' : 'warn'}`}>
+                  Workers {workerMonitor?.redis_ok ? 'Online' : 'Unavailable'}
+                </span>
               </div>
             </div>
 
@@ -3665,6 +3878,104 @@ function HomePageContent() {
                     >
                       {systemConfig.bedrock_session_token_set ? 'Update' : 'Set'}
                     </button>
+                  </div>
+                </section>
+
+                <section className="system-card">
+                  <div className="drawer-title">Queue Monitor</div>
+                  <div className="queue-stats-grid">
+                    <div className="queue-stat">
+                      <div className="subtle">Queue</div>
+                      <div className="queue-stat-value">{workerMonitor?.queue?.name ?? 'review-jobs'}</div>
+                    </div>
+                    <div className="queue-stat">
+                      <div className="subtle">Queued</div>
+                      <div className="queue-stat-value">{workerMonitor?.queue?.queued ?? 0}</div>
+                    </div>
+                    <div className="queue-stat">
+                      <div className="subtle">Running</div>
+                      <div className="queue-stat-value">{workerMonitor?.queue?.started ?? 0}</div>
+                    </div>
+                    <div className="queue-stat">
+                      <div className="subtle">Failed</div>
+                      <div className="queue-stat-value">{workerMonitor?.queue?.failed ?? 0}</div>
+                    </div>
+                    <div className="queue-stat">
+                      <div className="subtle">Deferred</div>
+                      <div className="queue-stat-value">{workerMonitor?.queue?.deferred ?? 0}</div>
+                    </div>
+                    <div className="queue-stat">
+                      <div className="subtle">Scheduled</div>
+                      <div className="queue-stat-value">{workerMonitor?.queue?.scheduled ?? 0}</div>
+                    </div>
+                  </div>
+                  <div className="spacer" />
+                  <div className="drawer-title">Workers</div>
+                  <div className="worker-list">
+                    {(workerMonitor?.workers ?? []).length === 0 && (
+                      <div className="subtle">
+                        {isWorkerMonitorLoading ? 'Loading workers…' : 'No worker heartbeat detected.'}
+                      </div>
+                    )}
+                    {(workerMonitor?.workers ?? []).map((worker) => (
+                      <div className="worker-row" key={worker.name}>
+                        <div>
+                          <div className="history-msg">{worker.name}</div>
+                          <div className="history-time">
+                            state={worker.state}
+                            {worker.current_job_id ? ` · job=${worker.current_job_id}` : ''}
+                          </div>
+                        </div>
+                        <span className="pill">
+                          {worker.last_heartbeat
+                            ? new Date(worker.last_heartbeat).toLocaleTimeString()
+                            : 'no heartbeat'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  {workerMonitor?.redis_error && (
+                    <div className="subtle">Redis error: {workerMonitor.redis_error}</div>
+                  )}
+                </section>
+
+                <section className="system-card system-card-span">
+                  <div className="system-card-head">
+                    <div className="drawer-title">Worker Logs</div>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={() => void loadWorkerMonitor()}
+                      disabled={isWorkerMonitorLoading}
+                    >
+                      {isWorkerMonitorLoading ? 'Refreshing…' : 'Refresh Logs'}
+                    </button>
+                  </div>
+                  <div className="worker-log-list">
+                    {(workerMonitor?.logs ?? []).length === 0 && (
+                      <div className="subtle">
+                        {isWorkerMonitorLoading ? 'Loading logs…' : 'No worker events yet.'}
+                      </div>
+                    )}
+                    {(workerMonitor?.logs ?? []).map((event) => (
+                      <div className={`worker-log-row ${event.level}`} key={event.id}>
+                        <div>
+                          <div className="history-msg">
+                            {event.message}
+                            {event.document_title ? ` · ${event.document_title}` : ''}
+                          </div>
+                          <div className="history-time">
+                            {new Date(event.timestamp).toLocaleString()} · {event.source}
+                            {event.review_job_id ? ` · review #${event.review_job_id}` : ''}
+                            {event.rq_job_id ? ` · rq ${event.rq_job_id}` : ''}
+                          </div>
+                          {event.detail && <div className="subtle worker-log-detail">{event.detail}</div>}
+                        </div>
+                        <span className={`status-pill ${event.level === 'error' ? 'warn' : 'neutral'}`}>
+                          {event.level}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </section>
 
