@@ -153,6 +153,18 @@ describe('page controls', () => {
           }
         ]);
       }
+      if (url.endsWith('/documents/202/versions')) {
+        return json([
+          {
+            id: 402,
+            tenant_id: 'local-dev',
+            document_id: 202,
+            version_label: 'Imported',
+            content: '# Imported Bundle',
+            created_at: new Date().toISOString()
+          }
+        ]);
+      }
       if (url.includes('/comments?document_version_id=401&review_job_id=501')) {
         return json([]);
       }
@@ -251,6 +263,19 @@ describe('page controls', () => {
           bedrock_secret_key_set: false,
           bedrock_session_token_set: false
         });
+      }
+      if (url.endsWith('/documents/import-bundle') && init?.method === 'POST') {
+        return json(
+          {
+            document_id: 202,
+            version_id: 402,
+            review_job_id: null,
+            comments_imported: 1,
+            personas_created: 0,
+            meta_comments_imported: 0
+          },
+          201
+        );
       }
       if (url.endsWith('/health')) return json({ status: 'ok' });
       if (url.endsWith('/admin/worker-monitor')) {
@@ -509,5 +534,35 @@ describe('page controls', () => {
     expect(await screen.findByText(/Import Preview: agents.json/i)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Apply Import' }));
     expect(await screen.findByText(/Import complete:/i)).toBeTruthy();
+  });
+
+  it('imports review bundle from library', async () => {
+    mockPathname = '/library';
+    render(<HomePage />);
+
+    const importInput = document.querySelector(
+      'input[type="file"][accept="application/json,.json,application/zip,.zip"]'
+    );
+    expect(importInput).toBeTruthy();
+    const bundle = {
+      name: 'review_bundle.json',
+      text: async () =>
+        JSON.stringify({
+          schema_version: 'odr.review-bundle.v2',
+          document: { title: 'Imported doc' },
+          version: { version_label: 'Imported', content: 'hello world' },
+          comments: [
+            {
+              persona_name: 'Clarity Editor',
+              text: 'Clarify',
+              start_offset: 0,
+              end_offset: 5
+            }
+          ]
+        })
+    };
+    fireEvent.change(importInput as HTMLInputElement, { target: { files: [bundle] } });
+
+    await screen.findByText(/Imported 1 review bundle/i);
   });
 });

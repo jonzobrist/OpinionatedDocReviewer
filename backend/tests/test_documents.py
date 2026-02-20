@@ -89,3 +89,98 @@ def test_document_version_content_size_limit(client) -> None:
         headers=headers,
     )
     assert response.status_code == 422
+
+
+def test_import_review_bundle_restores_comments_and_meta(client) -> None:
+    headers = {"X-Tenant-Id": "tenant-import"}
+    bundle_payload = {
+        "schema_version": "odr.review-bundle.v2",
+        "document": {"title": "Imported Bundle Doc"},
+        "version": {"version_label": "Imported v1", "content": "Alpha beta gamma delta"},
+        "review_job": {
+            "status": "completed",
+            "trigger": "import",
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+        },
+        "personas": [
+            {
+                "id": 99,
+                "name": "Bundle Persona",
+                "description": "from bundle",
+                "system_prompt": "review",
+                "focus_areas": ["clarity"],
+                "tone": "direct",
+                "output_requirements": {"format": "bullet_list"},
+                "examples": [],
+                "sort_order": 10,
+                "color_theme": "#1d8a7a",
+                "is_active": True,
+            }
+        ],
+        "comments": [
+            {
+                "id": 1001,
+                "persona_id": 99,
+                "persona_name": "Bundle Persona",
+                "text": "Clarify opening",
+                "start_offset": 0,
+                "end_offset": 5,
+                "excerpt": "Alpha",
+                "output_metadata": {"severity": "low"},
+            }
+        ],
+        "meta_review_run": {
+            "status": "completed",
+            "is_synthesized": True,
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "comments": [
+                {
+                    "content": "Tighten intro",
+                    "category": "clarity",
+                    "priority": "medium",
+                    "start_offset": 0,
+                    "end_offset": 5,
+                    "order_index": 0,
+                    "is_unsynthesized": False,
+                    "sources": [
+                        {
+                            "comment_id": 1001,
+                            "reviewer_name": "Bundle Persona",
+                            "reviewer_id": 99,
+                            "original_comment_text": "Clarify opening",
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+
+    import_resp = client.post("/api/documents/import-bundle", json=bundle_payload, headers=headers)
+    assert import_resp.status_code == 201
+    result = import_resp.json()
+    assert result["comments_imported"] == 1
+    assert result["meta_comments_imported"] == 1
+
+    library_resp = client.get("/api/documents/library", headers=headers)
+    assert library_resp.status_code == 200
+    assert any(item["id"] == result["document_id"] for item in library_resp.json())
+
+    comments_resp = client.get(
+        f"/api/comments?document_version_id={result['version_id']}&review_job_id={result['review_job_id']}",
+        headers=headers,
+    )
+    assert comments_resp.status_code == 200
+    comments = comments_resp.json()
+    assert len(comments) == 1
+    assert comments[0]["text"] == "Clarify opening"
+
+    meta_resp = client.get(
+        f"/api/meta-reviews/latest?document_version_id={result['version_id']}&review_job_id={result['review_job_id']}",
+        headers=headers,
+    )
+    assert meta_resp.status_code == 200
+    meta = meta_resp.json()
+    assert len(meta["comments"]) == 1
+    assert meta["comments"][0]["sources"][0]["reviewer_name"] == "Bundle Persona"

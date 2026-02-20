@@ -196,6 +196,7 @@ function HomePageContent() {
     total: number;
   } | null>(null);
   const [isReviewStarting, setIsReviewStarting] = useState(false);
+  const [isBundleImporting, setIsBundleImporting] = useState(false);
   const [connectorPaths, setConnectorPaths] = useState<ConnectorPath[]>([]);
   const [highlightTick, setHighlightTick] = useState(0);
   const [editingPersonaId, setEditingPersonaId] = useState<number | null>(null);
@@ -222,6 +223,7 @@ function HomePageContent() {
   const hoverAlignFrameRef = useRef<number | null>(null);
   const handledRouteIntentRef = useRef<string | null>(null);
   const importAgentsInputRef = useRef<HTMLInputElement | null>(null);
+  const importReviewBundleInputRef = useRef<HTMLInputElement | null>(null);
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1943,6 +1945,88 @@ function HomePageContent() {
     };
   }
 
+  function buildReviewBundleJson() {
+    if (!selectedVersion) return null;
+    const context = buildCommentExportContext();
+    if (!context) return null;
+    const comments = context.sorted.map((comment) => ({
+      id: comment.id,
+      persona_id: comment.persona_id,
+      persona_name: personaMap.get(comment.persona_id)?.name ?? null,
+      text: comment.text,
+      start_offset: comment.start_offset,
+      end_offset: comment.end_offset,
+      excerpt: comment.excerpt,
+      output_metadata: comment.output_metadata ?? null,
+      created_at: comment.created_at
+    }));
+    const personaIds = new Set(comments.map((comment) => comment.persona_id));
+    const personasForBundle = personas
+      .filter((persona) => personaIds.has(persona.id))
+      .map((persona) => ({
+        id: persona.id,
+        name: persona.name,
+        description: persona.description,
+        system_prompt: persona.system_prompt,
+        focus_areas: persona.focus_areas,
+        tone: persona.tone,
+        reference_notes: persona.reference_notes,
+        output_requirements: persona.output_requirements,
+        examples: persona.examples,
+        sort_order: persona.sort_order,
+        color_theme: persona.color_theme,
+        is_active: persona.is_active
+      }));
+    return {
+      schema_version: 'odr.review-bundle.v2',
+      exported_at: new Date().toISOString(),
+      document: {
+        title: context.title
+      },
+      version: {
+        version_label: selectedVersion.version_label,
+        content: selectedVersion.content
+      },
+      review_job: selectedReviewJob
+        ? {
+            status: selectedReviewJob.status,
+            trigger: selectedReviewJob.trigger,
+            provider: selectedReviewJob.provider,
+            model: selectedReviewJob.model,
+            created_at: selectedReviewJob.created_at,
+            completed_at: selectedReviewJob.completed_at
+          }
+        : null,
+      personas: personasForBundle,
+      comments,
+      meta_review_run: metaReviewRun
+        ? {
+            status: metaReviewRun.status,
+            is_synthesized: metaReviewRun.is_synthesized,
+            provider: metaReviewRun.provider,
+            model: metaReviewRun.model,
+            error_message: metaReviewRun.error_message,
+            created_at: metaReviewRun.created_at,
+            comments: metaReviewRun.comments.map((metaComment) => ({
+              content: metaComment.content,
+              category: metaComment.category,
+              priority: metaComment.priority,
+              start_offset: metaComment.start_offset,
+              end_offset: metaComment.end_offset,
+              order_index: metaComment.order_index,
+              is_unsynthesized: metaComment.is_unsynthesized,
+              sources: metaComment.sources.map((source) => ({
+                comment_id: source.comment_id,
+                reviewer_name: source.reviewer_name,
+                reviewer_id: source.reviewer_id,
+                original_comment_text: source.original_comment_text
+              }))
+            }))
+          }
+        : null
+    };
+  }
+
   function buildCommentsMarkdown() {
     if (!selectedVersion) return null;
     const context = buildCommentExportContext();
@@ -1973,8 +2057,9 @@ function HomePageContent() {
     if (!selectedVersion) return;
     const context = buildCommentExportContext();
     const commentsJson = buildCommentsJson();
+    const reviewBundle = buildReviewBundleJson();
     const commentsMd = buildCommentsMarkdown();
-    if (!context || !commentsJson || !commentsMd) return;
+    if (!context || !commentsJson || !commentsMd || !reviewBundle) return;
 
     const zip = new JSZip();
     const docHeader = [
@@ -1992,6 +2077,7 @@ function HomePageContent() {
     zip.file(`${context.safeTitle}_reviewed.md`, `${docHeader}${selectedVersion.content}`);
     zip.file(`${context.safeTitle}_comments.md`, commentsMd.markdown);
     zip.file(`${context.safeTitle}_comments.json`, JSON.stringify(commentsJson, null, 2));
+    zip.file(`${context.safeTitle}_review_bundle.json`, JSON.stringify(reviewBundle, null, 2));
     zip.file(
       'manifest.json',
       JSON.stringify(
@@ -2004,7 +2090,8 @@ function HomePageContent() {
           files: [
             `${context.safeTitle}_reviewed.md`,
             `${context.safeTitle}_comments.md`,
-            `${context.safeTitle}_comments.json`
+            `${context.safeTitle}_comments.json`,
+            `${context.safeTitle}_review_bundle.json`
           ]
         },
         null,
@@ -2040,6 +2127,78 @@ function HomePageContent() {
     const commentsMd = buildCommentsMarkdown();
     if (!commentsMd) return;
     downloadFile(`${context.safeTitle}_comments.md`, commentsMd.markdown);
+  }
+
+  async function handleImportReviewBundleFiles(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    setIsBundleImporting(true);
+    setErrorMessage(null);
+    try {
+      let importedCount = 0;
+      for (const file of list) {
+        const filename = file.name.toLowerCase();
+        let payload: unknown = null;
+        if (filename.endsWith('.zip')) {
+          const data = await file.arrayBuffer();
+          const zip = await JSZip.loadAsync(data);
+          const bundleEntry =
+            Object.values(zip.files).find((entry) => entry.name.endsWith('_review_bundle.json')) ??
+            Object.values(zip.files).find((entry) => entry.name.endsWith('_comments.json'));
+          if (!bundleEntry) {
+            throw new Error(`No importable bundle JSON found in ${file.name}`);
+          }
+          payload = JSON.parse(await bundleEntry.async('text'));
+        } else if (filename.endsWith('.json')) {
+          payload = JSON.parse(await file.text());
+        } else {
+          throw new Error(`Unsupported bundle file: ${file.name}`);
+        }
+
+        // Backward compatibility: old comments-only export format.
+        if (payload && typeof payload === 'object' && 'comments' in payload && !('document' in payload)) {
+          const legacy = payload as {
+            document_title?: string;
+            version_label?: string;
+            comments?: Array<{ excerpt?: string | null; text?: string | null }>;
+          };
+          const legacyContent = (legacy.comments ?? [])
+            .map((comment) => comment.excerpt || comment.text || '')
+            .join('\n')
+            .trim();
+          payload = {
+            schema_version: 'odr.review-bundle.v1-legacy',
+            document: { title: legacy.document_title ?? `Imported ${Date.now()}` },
+            version: {
+              version_label: legacy.version_label ?? 'Imported',
+              content: legacyContent || 'Imported review bundle'
+            },
+            comments: Array.isArray(legacy.comments) ? legacy.comments : []
+          };
+        }
+
+        const result = await apiFetch<{
+          document_id: number;
+          version_id: number;
+          review_job_id: number | null;
+          comments_imported: number;
+          personas_created: number;
+          meta_comments_imported: number;
+        }>('/documents/import-bundle', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+        importedCount += 1;
+        setSelectedDocumentId(result.document_id);
+        await loadVersions(result.document_id);
+      }
+      await refreshAll();
+      setStatusMessage(`Imported ${importedCount} review bundle${importedCount === 1 ? '' : 's'}.`);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setIsBundleImporting(false);
+    }
   }
 
   return (
@@ -2644,6 +2803,27 @@ function HomePageContent() {
                 </div>
               </div>
               <div className="library-actions">
+                <button
+                  className="ghost-button"
+                  type="button"
+                  disabled={isBundleImporting}
+                  onClick={() => importReviewBundleInputRef.current?.click()}
+                >
+                  {isBundleImporting ? 'Importing…' : 'Import Bundle'}
+                </button>
+                <input
+                  ref={importReviewBundleInputRef}
+                  type="file"
+                  accept="application/json,.json,application/zip,.zip"
+                  multiple
+                  hidden
+                  onChange={(event) => {
+                    if (event.target.files) {
+                      void handleImportReviewBundleFiles(event.target.files);
+                    }
+                    event.target.value = '';
+                  }}
+                />
                 <div className="library-filters">
                   <button
                     className={`filter-chip ${libraryFilter === 'all' ? 'active' : ''}`}
