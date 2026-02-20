@@ -54,7 +54,7 @@ const POLL_INTERVAL_MS = 1200;
 const AGENT_COLORS = ['#1d8a7a', '#2d6eea', '#b7482f', '#7a4bd3', '#c57a1b', '#0f6e88'];
 
 type DocSegment = { text: string; comment?: CommentRead };
-type ConnectorPath = { id: number; path: string; color: string };
+type ConnectorPath = { id: string; path: string; color: string };
 type AgentDraft = {
   name: string;
   description: string;
@@ -172,6 +172,8 @@ function HomePageContent() {
   const [commentViewMode, setCommentViewMode] = useState<'individual' | 'meta'>('individual');
   const [focusedCommentId, setFocusedCommentId] = useState<number | null>(null);
   const [hoveredCommentId, setHoveredCommentId] = useState<number | null>(null);
+  const [focusedMetaCommentId, setFocusedMetaCommentId] = useState<number | null>(null);
+  const [hoveredMetaCommentId, setHoveredMetaCommentId] = useState<number | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -219,7 +221,9 @@ function HomePageContent() {
   const feedListRef = useRef<HTMLDivElement | null>(null);
   const markRefs = useRef<Record<number, HTMLElement | null>>({});
   const cardRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const metaCardRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const hoveredCommentIdRef = useRef<number | null>(null);
+  const hoveredMetaCommentIdRef = useRef<number | null>(null);
   const hoverAlignFrameRef = useRef<number | null>(null);
   const handledRouteIntentRef = useRef<string | null>(null);
   const importAgentsInputRef = useRef<HTMLInputElement | null>(null);
@@ -359,20 +363,21 @@ function HomePageContent() {
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
-      if (!focusedCommentId) return;
+      if (!focusedCommentId && !focusedMetaCommentId) return;
       const target = event.target as HTMLElement | null;
       if (!target) return;
       const inComment = target.closest('.comment-card');
       const inHighlight = target.closest('.doc-highlight');
       if (!inComment && !inHighlight) {
         setFocusedCommentId(null);
+        setFocusedMetaCommentId(null);
       }
     };
     window.addEventListener('pointerdown', onPointerDown);
     return () => {
       window.removeEventListener('pointerdown', onPointerDown);
     };
-  }, [focusedCommentId]);
+  }, [focusedCommentId, focusedMetaCommentId]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -1487,6 +1492,39 @@ function HomePageContent() {
   }, [metaReviewRun, metaCategoryFilter]);
 
   const activeCommentId = focusedCommentId ?? hoveredCommentId;
+  const activeMetaCommentId = commentViewMode === 'meta' ? focusedMetaCommentId ?? hoveredMetaCommentId : null;
+  const activePathId =
+    commentViewMode === 'meta'
+      ? activeMetaCommentId
+        ? `m-${activeMetaCommentId}`
+        : null
+      : activeCommentId
+        ? `c-${activeCommentId}`
+        : null;
+
+  useEffect(() => {
+    if (!hoveredMetaCommentId || focusedMetaCommentId) return;
+    if (commentViewMode !== 'meta') return;
+    if (hoverAlignFrameRef.current !== null) {
+      cancelAnimationFrame(hoverAlignFrameRef.current);
+    }
+    hoverAlignFrameRef.current = requestAnimationFrame(() => {
+      const card = metaCardRefs.current[hoveredMetaCommentId];
+      card?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      const metaItem = filteredMetaComments.find((item) => item.id === hoveredMetaCommentId);
+      const sourceCommentId = metaItem?.sources[0]?.comment_id ?? null;
+      if (sourceCommentId) {
+        const mark = markRefs.current[sourceCommentId];
+        mark?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      }
+    });
+    return () => {
+      if (hoverAlignFrameRef.current !== null) {
+        cancelAnimationFrame(hoverAlignFrameRef.current);
+        hoverAlignFrameRef.current = null;
+      }
+    };
+  }, [hoveredMetaCommentId, focusedMetaCommentId, commentViewMode, filteredMetaComments]);
   const [floatingCardStyle, setFloatingCardStyle] = useState<{
     left: number;
     top: number;
@@ -1500,6 +1538,15 @@ function HomePageContent() {
   useEffect(() => {
     hoveredCommentIdRef.current = hoveredCommentId;
   }, [hoveredCommentId]);
+
+  useEffect(() => {
+    hoveredMetaCommentIdRef.current = hoveredMetaCommentId;
+  }, [hoveredMetaCommentId]);
+
+  useEffect(() => {
+    setHoveredMetaCommentId(null);
+    setFocusedMetaCommentId(null);
+  }, [selectedVersionId, selectedReviewJobId, commentViewMode]);
 
   useEffect(() => {
     const root = docBodyRef.current;
@@ -1669,6 +1716,15 @@ function HomePageContent() {
     [visibleComments, focusedCommentId]
   );
   const dockCenterIndex = focusedCommentId ? focusCenterIndex : hoverCenterIndex;
+  const metaHoverCenterIndex = useMemo(
+    () => filteredMetaComments.findIndex((comment) => comment.id === hoveredMetaCommentId),
+    [filteredMetaComments, hoveredMetaCommentId]
+  );
+  const metaFocusCenterIndex = useMemo(
+    () => filteredMetaComments.findIndex((comment) => comment.id === focusedMetaCommentId),
+    [filteredMetaComments, focusedMetaCommentId]
+  );
+  const metaDockCenterIndex = focusedMetaCommentId ? metaFocusCenterIndex : metaHoverCenterIndex;
 
   const docSegments = useMemo(() => {
     if (!selectedVersion) return [];
@@ -1716,28 +1772,52 @@ function HomePageContent() {
         rect.left <= window.innerWidth + padding;
       const nextPaths: ConnectorPath[] = [];
 
-      for (const comment of anchoredComments) {
-        const mark = markRefs.current[comment.id];
-        const card = cardRefs.current[comment.id];
-        if (!mark || !card) continue;
+      if (commentViewMode === 'meta') {
+        for (const metaComment of filteredMetaComments) {
+          const sourceCommentId = metaComment.sources[0]?.comment_id ?? null;
+          if (!sourceCommentId) continue;
+          const mark = markRefs.current[sourceCommentId];
+          const card = metaCardRefs.current[metaComment.id];
+          if (!mark || !card) continue;
+          const from = mark.getBoundingClientRect();
+          const to = card.getBoundingClientRect();
+          if (!intersectsViewport(to)) continue;
+          const verticalGap = Math.abs(to.top - from.top);
+          const maxVerticalGap = Math.max(window.innerHeight * 2.5, 1800);
+          if (verticalGap > maxVerticalGap) continue;
+          const startX = from.right - workspaceRect.left + 6;
+          const startY = from.top + from.height / 2 - workspaceRect.top;
+          const endX = to.left - workspaceRect.left - 8;
+          const endY = to.top + to.height / 2 - workspaceRect.top;
+          const delta = Math.max(42, (endX - startX) * 0.45);
+          const path = `M ${startX} ${startY} C ${startX + delta} ${startY}, ${endX - delta} ${endY}, ${endX} ${endY}`;
+          const color = colorForPriority(metaComment.priority);
+          nextPaths.push({ id: `m-${metaComment.id}`, path, color });
+        }
+      } else {
+        for (const comment of anchoredComments) {
+          const mark = markRefs.current[comment.id];
+          const card = cardRefs.current[comment.id];
+          if (!mark || !card) continue;
 
-        const from = mark.getBoundingClientRect();
-        const to = card.getBoundingClientRect();
-        if (!intersectsViewport(to)) continue;
-        const verticalGap = Math.abs(to.top - from.top);
-        const maxVerticalGap = Math.max(window.innerHeight * 2.5, 1800);
-        if (verticalGap > maxVerticalGap) continue;
-        const startX = from.right - workspaceRect.left + 6;
-        const startY = from.top + from.height / 2 - workspaceRect.top;
-        const endX = to.left - workspaceRect.left - 8;
-        const endY = to.top + to.height / 2 - workspaceRect.top;
-        const delta = Math.max(42, (endX - startX) * 0.45);
-        const path = `M ${startX} ${startY} C ${startX + delta} ${startY}, ${endX - delta} ${endY}, ${endX} ${endY}`;
-        const persona = personaMap.get(comment.persona_id);
-        const color = persona
-          ? getThemeForPersona(agentThemes, persona.id, colorForPersona(persona.id))
-          : AGENT_COLORS[0];
-        nextPaths.push({ id: comment.id, path, color });
+          const from = mark.getBoundingClientRect();
+          const to = card.getBoundingClientRect();
+          if (!intersectsViewport(to)) continue;
+          const verticalGap = Math.abs(to.top - from.top);
+          const maxVerticalGap = Math.max(window.innerHeight * 2.5, 1800);
+          if (verticalGap > maxVerticalGap) continue;
+          const startX = from.right - workspaceRect.left + 6;
+          const startY = from.top + from.height / 2 - workspaceRect.top;
+          const endX = to.left - workspaceRect.left - 8;
+          const endY = to.top + to.height / 2 - workspaceRect.top;
+          const delta = Math.max(42, (endX - startX) * 0.45);
+          const path = `M ${startX} ${startY} C ${startX + delta} ${startY}, ${endX - delta} ${endY}, ${endX} ${endY}`;
+          const persona = personaMap.get(comment.persona_id);
+          const color = persona
+            ? getThemeForPersona(agentThemes, persona.id, colorForPersona(persona.id))
+            : AGENT_COLORS[0];
+          nextPaths.push({ id: `c-${comment.id}`, path, color });
+        }
       }
       setConnectorPaths((prev) => {
         if (prev.length !== nextPaths.length) return nextPaths;
@@ -1769,7 +1849,16 @@ function HomePageContent() {
       feed?.removeEventListener('scroll', onResize);
       doc?.removeEventListener('scroll', onResize);
     };
-  }, [anchoredComments, selectedVersion, personaMap, agentThemes, docMode, highlightTick]);
+  }, [
+    anchoredComments,
+    selectedVersion,
+    personaMap,
+    agentThemes,
+    docMode,
+    highlightTick,
+    commentViewMode,
+    filteredMetaComments
+  ]);
 
   useEffect(() => {
     if (commentViewMode !== 'individual' || !activeCommentId) {
@@ -1830,9 +1919,28 @@ function HomePageContent() {
   }
 
   function handleFeedPointerMove(event: ReactMouseEvent<HTMLDivElement>) {
-    if (focusedCommentId) return;
     const target = event.target as HTMLElement | null;
-    const card = target?.closest<HTMLElement>('.comment-card[data-comment-id]');
+    if (!target) return;
+    if (commentViewMode === 'meta') {
+      if (focusedMetaCommentId) return;
+      const metaCard = target.closest<HTMLElement>('.comment-card[data-meta-id]');
+      if (!metaCard) {
+        if (hoveredMetaCommentIdRef.current !== null) {
+          setHoveredMetaCommentId(null);
+        }
+        return;
+      }
+      const rawMetaId = metaCard.dataset.metaId;
+      if (!rawMetaId) return;
+      const nextMetaId = Number(rawMetaId);
+      if (!Number.isFinite(nextMetaId)) return;
+      if (hoveredMetaCommentIdRef.current !== nextMetaId) {
+        setHoveredMetaCommentId(nextMetaId);
+      }
+      return;
+    }
+    if (focusedCommentId) return;
+    const card = target.closest<HTMLElement>('.comment-card[data-comment-id]');
     if (!card) {
       if (hoveredCommentIdRef.current !== null) {
         setHoveredCommentId(null);
@@ -1849,20 +1957,31 @@ function HomePageContent() {
   }
 
   useEffect(() => {
-    if (!hoveredCommentId || focusedCommentId) return;
+    if (commentViewMode === 'individual' && (!hoveredCommentId || focusedCommentId)) return;
+    if (commentViewMode === 'meta' && (!hoveredMetaCommentId || focusedMetaCommentId)) return;
     const onPointerMove = (event: PointerEvent) => {
       const target = event.target as HTMLElement | null;
       if (!target) return;
       const inFeed = Boolean(target.closest('.feed-panel'));
       if (!inFeed) {
-        setHoveredCommentId(null);
+        if (commentViewMode === 'individual') {
+          setHoveredCommentId(null);
+        } else {
+          setHoveredMetaCommentId(null);
+        }
       }
     };
     window.addEventListener('pointermove', onPointerMove);
     return () => {
       window.removeEventListener('pointermove', onPointerMove);
     };
-  }, [hoveredCommentId, focusedCommentId]);
+  }, [
+    hoveredCommentId,
+    focusedCommentId,
+    hoveredMetaCommentId,
+    focusedMetaCommentId,
+    commentViewMode
+  ]);
 
   useEffect(() => {
     if (normalizedPath !== '/') return;
@@ -2302,8 +2421,8 @@ function HomePageContent() {
                 key={item.id}
                 d={item.path}
                 stroke={item.color}
-                className={`link-path ${activeCommentId === item.id ? 'selected' : ''} ${
-                  activeCommentId && activeCommentId !== item.id ? 'dimmed' : ''
+                className={`link-path ${activePathId === item.id ? 'selected' : ''} ${
+                  activePathId && activePathId !== item.id ? 'dimmed' : ''
                 }`}
                 strokeWidth={2.4}
                 strokeLinecap="round"
@@ -2444,6 +2563,7 @@ function HomePageContent() {
             className="feed-panel"
             onMouseLeave={() => {
               if (!focusedCommentId) setHoveredCommentId(null);
+              if (!focusedMetaCommentId) setHoveredMetaCommentId(null);
             }}
           >
             <div className="feed-header">
@@ -2525,7 +2645,10 @@ function HomePageContent() {
               className="feed-list"
               ref={feedListRef}
               onMouseMove={handleFeedPointerMove}
-              onMouseLeave={() => setHoveredCommentId(null)}
+              onMouseLeave={() => {
+                setHoveredCommentId(null);
+                setHoveredMetaCommentId(null);
+              }}
             >
               {commentViewMode === 'individual' && visibleComments.length === 0 && (
                 <div className="empty-feed">Waiting for anchored comments…</div>
@@ -2620,18 +2743,46 @@ function HomePageContent() {
                 )}
               {commentViewMode === 'meta' &&
                 !isMetaLoading &&
-                filteredMetaComments.map((metaComment) => {
+                filteredMetaComments.map((metaComment, index) => {
                   const topSource = metaComment.sources[0];
                   const pseudoColor = colorForPriority(metaComment.priority);
+                  const distance =
+                    metaDockCenterIndex >= 0
+                      ? Math.abs(index - metaDockCenterIndex)
+                      : Number.POSITIVE_INFINITY;
+                  let scale = 1;
+                  if (distance === 0) scale = 1.55;
+                  else if (distance === 1) scale = 1.2;
+                  else if (distance === 2) scale = 1.08;
+                  const shift = distance === 0 ? -12 : 0;
+                  const zIndex = distance === 0 ? 140 : distance === 1 ? 80 : distance === 2 ? 48 : 1;
                   return (
                     <div
                       key={`meta-${metaComment.id}`}
-                      className={`comment-card meta-card priority-${metaComment.priority}`}
-                      style={{ borderLeftColor: pseudoColor }}
+                      ref={(element) => {
+                        metaCardRefs.current[metaComment.id] = element;
+                      }}
+                      data-meta-id={metaComment.id}
+                      className={`comment-card meta-card priority-${metaComment.priority} ${
+                        activeMetaCommentId === metaComment.id ? 'selected' : ''
+                      } ${activeMetaCommentId && activeMetaCommentId !== metaComment.id ? 'dimmed' : ''}`}
+                      style={
+                        {
+                          borderLeftColor: pseudoColor,
+                          ['--dock-scale' as '--dock-scale']: scale,
+                          ['--dock-shift' as '--dock-shift']: `${shift}px`,
+                          zIndex
+                        } as CSSProperties
+                      }
                       onClick={() => {
+                        setFocusedMetaCommentId((prev) => (prev === metaComment.id ? null : metaComment.id));
                         if (topSource?.comment_id) {
                           focusComment(topSource.comment_id);
                         }
+                      }}
+                      onMouseEnter={() => setHoveredMetaCommentId(metaComment.id)}
+                      onMouseLeave={() => {
+                        if (!focusedMetaCommentId) setHoveredMetaCommentId(null);
                       }}
                     >
                       <div className="comment-head">
