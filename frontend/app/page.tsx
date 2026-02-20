@@ -702,7 +702,12 @@ function HomePageContent() {
           return latest;
         } catch (error) {
           const message = normalizeError(error);
-          if (!message.includes('404')) {
+          const lower = message.toLowerCase();
+          const missingMetaRun =
+            lower.includes('404') ||
+            lower.includes('meta review run not found') ||
+            lower.includes('not found');
+          if (!missingMetaRun) {
             throw error;
           }
         }
