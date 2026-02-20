@@ -201,6 +201,11 @@ function HomePageContent() {
   const [isBundleImporting, setIsBundleImporting] = useState(false);
   const [connectorPaths, setConnectorPaths] = useState<ConnectorPath[]>([]);
   const [highlightTick, setHighlightTick] = useState(0);
+  const [floatingMetaCardStyle, setFloatingMetaCardStyle] = useState<{
+    left: number;
+    top: number;
+    width: number;
+  } | null>(null);
   const [editingPersonaId, setEditingPersonaId] = useState<number | null>(null);
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
   const [agentDraft, setAgentDraft] = useState<AgentDraft>(() => createEmptyAgentDraft());
@@ -1525,6 +1530,10 @@ function HomePageContent() {
       }
     };
   }, [hoveredMetaCommentId, focusedMetaCommentId, commentViewMode, filteredMetaComments]);
+  const floatingMetaComment = useMemo(
+    () => filteredMetaComments.find((comment) => comment.id === activeMetaCommentId) ?? null,
+    [filteredMetaComments, activeMetaCommentId]
+  );
   const [floatingCardStyle, setFloatingCardStyle] = useState<{
     left: number;
     top: number;
@@ -1774,25 +1783,27 @@ function HomePageContent() {
 
       if (commentViewMode === 'meta') {
         for (const metaComment of filteredMetaComments) {
-          const sourceCommentId = metaComment.sources[0]?.comment_id ?? null;
-          if (!sourceCommentId) continue;
-          const mark = markRefs.current[sourceCommentId];
           const card = metaCardRefs.current[metaComment.id];
-          if (!mark || !card) continue;
-          const from = mark.getBoundingClientRect();
+          if (!card) continue;
           const to = card.getBoundingClientRect();
           if (!intersectsViewport(to)) continue;
-          const verticalGap = Math.abs(to.top - from.top);
-          const maxVerticalGap = Math.max(window.innerHeight * 2.5, 1800);
-          if (verticalGap > maxVerticalGap) continue;
-          const startX = from.right - workspaceRect.left + 6;
-          const startY = from.top + from.height / 2 - workspaceRect.top;
-          const endX = to.left - workspaceRect.left - 8;
-          const endY = to.top + to.height / 2 - workspaceRect.top;
-          const delta = Math.max(42, (endX - startX) * 0.45);
-          const path = `M ${startX} ${startY} C ${startX + delta} ${startY}, ${endX - delta} ${endY}, ${endX} ${endY}`;
           const color = colorForPriority(metaComment.priority);
-          nextPaths.push({ id: `m-${metaComment.id}`, path, color });
+          metaComment.sources.forEach((source, sourceIndex) => {
+            const sourceCommentId = source.comment_id;
+            const mark = sourceCommentId ? markRefs.current[sourceCommentId] : null;
+            if (!mark) return;
+            const from = mark.getBoundingClientRect();
+            const verticalGap = Math.abs(to.top - from.top);
+            const maxVerticalGap = Math.max(window.innerHeight * 2.5, 1800);
+            if (verticalGap > maxVerticalGap) return;
+            const startX = from.right - workspaceRect.left + 6;
+            const startY = from.top + from.height / 2 - workspaceRect.top;
+            const endX = to.left - workspaceRect.left - 8;
+            const endY = to.top + to.height / 2 - workspaceRect.top;
+            const delta = Math.max(42, (endX - startX) * 0.45);
+            const path = `M ${startX} ${startY} C ${startX + delta} ${startY}, ${endX - delta} ${endY}, ${endX} ${endY}`;
+            nextPaths.push({ id: `m-${metaComment.id}-${sourceIndex}`, path, color });
+          });
         }
       } else {
         for (const comment of anchoredComments) {
@@ -1857,7 +1868,9 @@ function HomePageContent() {
     docMode,
     highlightTick,
     commentViewMode,
-    filteredMetaComments
+    filteredMetaComments,
+    hoveredMetaCommentId,
+    focusedMetaCommentId
   ]);
 
   useEffect(() => {
@@ -1904,6 +1917,51 @@ function HomePageContent() {
       doc?.removeEventListener('scroll', onRecalc);
     };
   }, [activeCommentId, commentViewMode, visibleComments, dockCenterIndex]);
+
+  useEffect(() => {
+    if (commentViewMode !== 'meta' || !activeMetaCommentId) {
+      setFloatingMetaCardStyle(null);
+      return;
+    }
+    const recalc = () => {
+      const card = metaCardRefs.current[activeMetaCommentId];
+      if (!card) {
+        setFloatingMetaCardStyle(null);
+        return;
+      }
+      const rect = card.getBoundingClientRect();
+      const margin = 18;
+      const topMargin = 82;
+      const scale = 1.55;
+      const width = Math.min(rect.width * scale, window.innerWidth - margin * 2);
+      const scaledHeight = rect.height * scale;
+      const left = Math.min(
+        window.innerWidth - width - margin,
+        Math.max(margin, rect.right - width)
+      );
+      const top = Math.min(
+        window.innerHeight - scaledHeight - margin,
+        Math.max(topMargin, rect.top + (rect.height - scaledHeight) / 2)
+      );
+      setFloatingMetaCardStyle({ left, top, width });
+    };
+
+    const frame = requestAnimationFrame(recalc);
+    const onRecalc = () => requestAnimationFrame(recalc);
+    window.addEventListener('resize', onRecalc);
+    window.addEventListener('scroll', onRecalc, true);
+    const feed = feedListRef.current;
+    const doc = docPanelRef.current;
+    feed?.addEventListener('scroll', onRecalc);
+    doc?.addEventListener('scroll', onRecalc);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('resize', onRecalc);
+      window.removeEventListener('scroll', onRecalc, true);
+      feed?.removeEventListener('scroll', onRecalc);
+      doc?.removeEventListener('scroll', onRecalc);
+    };
+  }, [activeMetaCommentId, commentViewMode, filteredMetaComments, metaDockCenterIndex]);
 
   function updateAgentTheme(id: number, color: string, label?: string) {
     setAgentThemes((prev) => {
@@ -2416,21 +2474,29 @@ function HomePageContent() {
       {selectedVersion && (
         <section className="workspace" ref={workspaceRef}>
           <svg className="link-layer" aria-hidden="true">
-            {connectorPaths.map((item) => (
+            {connectorPaths.map((item) => {
+              const selected =
+                commentViewMode === 'meta'
+                  ? Boolean(activeMetaCommentId) && item.id.startsWith(`m-${activeMetaCommentId}-`)
+                  : activePathId === item.id;
+              const dimmed =
+                commentViewMode === 'meta'
+                  ? Boolean(activeMetaCommentId) && !item.id.startsWith(`m-${activeMetaCommentId}-`)
+                  : Boolean(activePathId) && activePathId !== item.id;
+              return (
               <path
                 key={item.id}
                 d={item.path}
                 stroke={item.color}
-                className={`link-path ${activePathId === item.id ? 'selected' : ''} ${
-                  activePathId && activePathId !== item.id ? 'dimmed' : ''
-                }`}
+                className={`link-path ${selected ? 'selected' : ''} ${dimmed ? 'dimmed' : ''}`}
                 strokeWidth={2.4}
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 vectorEffect="non-scaling-stroke"
                 fill="none"
               />
-            ))}
+              );
+            })}
           </svg>
           <div className="doc-panel" ref={docPanelRef}>
             <div className="doc-header">
@@ -2746,6 +2812,10 @@ function HomePageContent() {
                 filteredMetaComments.map((metaComment, index) => {
                   const topSource = metaComment.sources[0];
                   const pseudoColor = colorForPriority(metaComment.priority);
+                  const isFloatingMetaActive =
+                    commentViewMode === 'meta' &&
+                    activeMetaCommentId === metaComment.id &&
+                    floatingMetaCardStyle !== null;
                   const distance =
                     metaDockCenterIndex >= 0
                       ? Math.abs(index - metaDockCenterIndex)
@@ -2754,7 +2824,8 @@ function HomePageContent() {
                   if (distance === 0) scale = 1.55;
                   else if (distance === 1) scale = 1.2;
                   else if (distance === 2) scale = 1.08;
-                  const shift = distance === 0 ? -12 : 0;
+                  if (isFloatingMetaActive) scale = 1;
+                  const shift = isFloatingMetaActive ? 0 : distance === 0 ? -12 : 0;
                   const zIndex = distance === 0 ? 140 : distance === 1 ? 80 : distance === 2 ? 48 : 1;
                   return (
                     <div
@@ -2765,7 +2836,9 @@ function HomePageContent() {
                       data-meta-id={metaComment.id}
                       className={`comment-card meta-card priority-${metaComment.priority} ${
                         activeMetaCommentId === metaComment.id ? 'selected' : ''
-                      } ${activeMetaCommentId && activeMetaCommentId !== metaComment.id ? 'dimmed' : ''}`}
+                      } ${activeMetaCommentId && activeMetaCommentId !== metaComment.id ? 'dimmed' : ''} ${
+                        isFloatingMetaActive ? 'ghost-active' : ''
+                      }`}
                       style={
                         {
                           borderLeftColor: pseudoColor,
@@ -2868,6 +2941,51 @@ function HomePageContent() {
                     <div className="comment-text">{formatCommentBody(floatingComment)}</div>
                     {floatingComment.excerpt && (
                       <div className="comment-source-preview">{floatingComment.excerpt}</div>
+                    )}
+                  </div>
+                </div>,
+                document.body
+              )}
+            {commentViewMode === 'meta' &&
+              floatingMetaComment &&
+              floatingMetaCardStyle &&
+              typeof document !== 'undefined' &&
+              createPortal(
+                <div className="comment-float-layer" aria-hidden="true">
+                  <div
+                    className="comment-float-card selected"
+                    style={
+                      {
+                        left: `${floatingMetaCardStyle.left}px`,
+                        top: `${floatingMetaCardStyle.top}px`,
+                        width: `${floatingMetaCardStyle.width}px`,
+                        borderLeftColor: colorForPriority(floatingMetaComment.priority)
+                      } as CSSProperties
+                    }
+                  >
+                    <div className="comment-head">
+                      <div className="comment-agent">
+                        <span
+                          className="agent-dot"
+                          style={{ backgroundColor: colorForPriority(floatingMetaComment.priority) }}
+                        />
+                        Meta Reviewer
+                      </div>
+                      <span className={`priority-pill ${floatingMetaComment.priority}`}>
+                        {floatingMetaComment.priority}
+                      </span>
+                    </div>
+                    <div className="meta-tags">
+                      <span className="meta-pill">{floatingMetaComment.category}</span>
+                      <span className="meta-pill">
+                        {floatingMetaComment.start_offset}-{floatingMetaComment.end_offset}
+                      </span>
+                    </div>
+                    <div className="comment-text">{floatingMetaComment.content}</div>
+                    {floatingMetaComment.sources.length > 0 && (
+                      <div className="comment-source-preview">
+                        {floatingMetaComment.sources[0].reviewer_name}: {floatingMetaComment.sources[0].original_comment_text}
+                      </div>
                     )}
                   </div>
                 </div>,
