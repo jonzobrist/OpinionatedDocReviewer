@@ -119,7 +119,7 @@ If `AUTH_MODE=oidc` and no token is sent, API replies with:
 
 ## Debian 12/13 systemd Deployment
 
-These steps run API, worker, and frontend as persistent services on Debian 12/13.
+Use the bundled setup script to install persistent backend, worker, and frontend services.
 
 1. Install base packages:
 
@@ -165,88 +165,36 @@ PROXY_TRUSTED_IPS=*
 EOF
 ```
 
-5. Create systemd units.
-
-`/etc/systemd/system/opdr-backend.service`
-
-```ini
-[Unit]
-Description=OpinionatedDocReviewer Backend API
-After=network.target redis-server.service
-Wants=redis-server.service
-
-[Service]
-Type=simple
-User=%i
-WorkingDirectory=/opt/OpinionatedDocReviewer/backend
-EnvironmentFile=/etc/opinionated-doc-reviewer/env
-Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/bin/bash -lc 'uv run uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8006}'
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-```
-
-`/etc/systemd/system/opdr-worker.service`
-
-```ini
-[Unit]
-Description=OpinionatedDocReviewer Review Worker
-After=network.target redis-server.service opdr-backend.service
-Wants=redis-server.service
-
-[Service]
-Type=simple
-User=%i
-WorkingDirectory=/opt/OpinionatedDocReviewer/backend
-EnvironmentFile=/etc/opinionated-doc-reviewer/env
-Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/bin/bash -lc 'uv run python -m app.worker'
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-```
-
-`/etc/systemd/system/opdr-frontend.service`
-
-```ini
-[Unit]
-Description=OpinionatedDocReviewer Frontend
-After=network.target opdr-backend.service
-
-[Service]
-Type=simple
-User=%i
-WorkingDirectory=/opt/OpinionatedDocReviewer/frontend
-EnvironmentFile=/etc/opinionated-doc-reviewer/env
-Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/bin/bash -lc 'PORT=${FRONTEND_PORT:-3001} bun run start'
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-```
-
-6. Enable and start (replace `zob` with your Linux user):
+5. Run setup script:
 
 ```bash
-sudo systemctl daemon-reload
+cd /opt/OpinionatedDocReviewer
+sudo ./scripts/systemd/setup.sh \
+  --user zob \
+  --repo-root /opt/OpinionatedDocReviewer \
+  --env-file /etc/opinionated-doc-reviewer/env \
+  --enable-now
+```
+
+This installs:
+- `/etc/systemd/system/opdr-backend.service`
+- `/etc/systemd/system/opdr-worker.service`
+- `/etc/systemd/system/opdr-frontend.service`
+
+6. Manual enable/start alternative (if you omitted `--enable-now`):
+
+```bash
 sudo systemctl enable --now redis-server
-sudo systemctl enable --now opdr-backend@zob.service
-sudo systemctl enable --now opdr-worker@zob.service
-sudo systemctl enable --now opdr-frontend@zob.service
+sudo systemctl enable --now opdr-backend.service
+sudo systemctl enable --now opdr-worker.service
+sudo systemctl enable --now opdr-frontend.service
 ```
 
 7. Verify:
 
 ```bash
-systemctl status opdr-backend@zob opdr-worker@zob opdr-frontend@zob --no-pager
-journalctl -u opdr-worker@zob -n 100 --no-pager
+systemctl status opdr-backend opdr-worker opdr-frontend --no-pager
+journalctl -u opdr-worker -n 100 --no-pager
 curl -sS http://127.0.0.1:8006/api/status
 ```
 
