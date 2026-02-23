@@ -1411,6 +1411,11 @@ function HomePageContent() {
     });
   }
 
+  function enableAllPersonas() {
+    const active = personas.filter((persona) => persona.is_active).map((persona) => persona.id);
+    setEnabledPersonas(new Set(active));
+  }
+
   const visibleComments = useMemo(() => {
     return comments
       .filter((comment) => enabledPersonas.has(comment.persona_id))
@@ -1442,6 +1447,7 @@ function HomePageContent() {
       ),
     [visibleComments]
   );
+  const hasFilteredOutComments = comments.length > 0 && visibleComments.length === 0;
 
   const personaMap = useMemo(() => {
     const map = new Map<number, PersonaRead>();
@@ -2717,7 +2723,18 @@ function HomePageContent() {
               }}
             >
               {commentViewMode === 'individual' && visibleComments.length === 0 && (
-                <div className="empty-feed">Waiting for anchored comments…</div>
+                <div className="empty-feed">
+                  {hasFilteredOutComments
+                    ? 'Comments are available, but all current agent filters are hidden.'
+                    : 'Waiting for anchored comments…'}
+                  {hasFilteredOutComments && (
+                    <div style={{ marginTop: 10 }}>
+                      <button className="ghost-button" type="button" onClick={enableAllPersonas}>
+                        Enable all agents
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
               {commentViewMode === 'individual' &&
                 visibleComments.map((comment, index) => {
