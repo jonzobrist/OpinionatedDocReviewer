@@ -214,6 +214,9 @@ OIDC mode behind proxy:
 - In UI, set `System` -> `Client Connection` -> `OIDC/JWT Access Token`.
 - If no token is provided, API calls return `{"detail":"Authorization bearer token is required"}`.
 
+For Debian 12/13 production-style service setup (`systemd` for backend/frontend/worker), see:
+- `/Users/zob/src/OpinionatedDocReviewer/backend/README.md` ("Debian 12/13 systemd Deployment")
+
 ## Agent Import/Export Packs
 
 Agent Studio supports structured portability for reviewer configs:

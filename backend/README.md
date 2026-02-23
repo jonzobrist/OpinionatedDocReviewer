@@ -116,3 +116,138 @@ AUTH_MODE=header
 
 If `AUTH_MODE=oidc` and no token is sent, API replies with:
 `{"detail":"Authorization bearer token is required"}`.
+
+## Debian 12/13 systemd Deployment
+
+These steps run API, worker, and frontend as persistent services on Debian 12/13.
+
+1. Install base packages:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git curl build-essential python3 python3-venv redis-server
+```
+
+2. Install Bun and uv (once):
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+3. Clone app and prepare deps:
+
+```bash
+sudo mkdir -p /opt/OpinionatedDocReviewer
+sudo chown -R "$USER":"$USER" /opt/OpinionatedDocReviewer
+git clone https://github.com/jonzobrist/OpinionatedDocReviewer.git /opt/OpinionatedDocReviewer
+cd /opt/OpinionatedDocReviewer/backend && uv sync
+cd /opt/OpinionatedDocReviewer/frontend && bun install --frozen-lockfile && bun run build
+```
+
+4. Create runtime env file:
+
+```bash
+sudo mkdir -p /etc/opinionated-doc-reviewer
+sudo tee /etc/opinionated-doc-reviewer/env >/dev/null <<'EOF'
+PORT=8006
+FRONTEND_PORT=3001
+REDIS_URL=redis://127.0.0.1:6379/0
+REVIEW_QUEUE_NAME=review-jobs
+REVIEW_INLINE=false
+LLM_PROVIDER=openai
+OPENAI_API_KEY=replace-me
+AUTH_MODE=header
+CORS_ALLOW_ORIGINS=https://odr.zlyxy.me
+ALLOWED_HOSTS=odr.zlyxy.me
+TRUST_PROXY_HEADERS=true
+PROXY_TRUSTED_IPS=*
+EOF
+```
+
+5. Create systemd units.
+
+`/etc/systemd/system/opdr-backend.service`
+
+```ini
+[Unit]
+Description=OpinionatedDocReviewer Backend API
+After=network.target redis-server.service
+Wants=redis-server.service
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/opt/OpinionatedDocReviewer/backend
+EnvironmentFile=/etc/opinionated-doc-reviewer/env
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/bin/bash -lc 'uv run uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8006}'
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`/etc/systemd/system/opdr-worker.service`
+
+```ini
+[Unit]
+Description=OpinionatedDocReviewer Review Worker
+After=network.target redis-server.service opdr-backend.service
+Wants=redis-server.service
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/opt/OpinionatedDocReviewer/backend
+EnvironmentFile=/etc/opinionated-doc-reviewer/env
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/bin/bash -lc 'uv run python -m app.worker'
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`/etc/systemd/system/opdr-frontend.service`
+
+```ini
+[Unit]
+Description=OpinionatedDocReviewer Frontend
+After=network.target opdr-backend.service
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/opt/OpinionatedDocReviewer/frontend
+EnvironmentFile=/etc/opinionated-doc-reviewer/env
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/bin/bash -lc 'PORT=${FRONTEND_PORT:-3001} bun run start'
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+```
+
+6. Enable and start (replace `zob` with your Linux user):
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now redis-server
+sudo systemctl enable --now opdr-backend@zob.service
+sudo systemctl enable --now opdr-worker@zob.service
+sudo systemctl enable --now opdr-frontend@zob.service
+```
+
+7. Verify:
+
+```bash
+systemctl status opdr-backend@zob opdr-worker@zob opdr-frontend@zob --no-pager
+journalctl -u opdr-worker@zob -n 100 --no-pager
+curl -sS http://127.0.0.1:8006/api/status
+```
+
+If review jobs remain `queued`, focus on `opdr-worker` logs first.
