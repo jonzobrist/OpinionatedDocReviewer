@@ -17,7 +17,7 @@ take_down() {
   pid=$(cat "$pid_file")
   if is_pid_running "$pid"; then
     echo "Stopping $name (pid $pid)"
-    kill "$pid" || true
+    kill_pid_tree "$pid"
     sleep 1
     if is_pid_running "$pid"; then
       echo "Force stopping $name (pid $pid)"

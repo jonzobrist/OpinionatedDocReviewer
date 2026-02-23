@@ -53,15 +53,51 @@ is_pid_running() {
   return 1
 }
 
+listener_pids_for_port() {
+  local port="$1"
+  if [ -z "$port" ]; then
+    return 0
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true
+    return 0
+  fi
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnp "sport = :$port" 2>/dev/null \
+      | grep -o 'pid=[0-9]\+' \
+      | cut -d= -f2 \
+      | sort -u || true
+    return 0
+  fi
+}
+
 is_port_in_use() {
   local port="$1"
   if [ -z "$port" ]; then
     return 1
   fi
-  if lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+  if [ -n "$(listener_pids_for_port "$port")" ]; then
     return 0
   fi
   return 1
+}
+
+kill_pid_tree() {
+  local pid="$1"
+  if [ -z "$pid" ]; then
+    return 0
+  fi
+  if ! is_pid_running "$pid"; then
+    return 0
+  fi
+  local children
+  children=$(pgrep -P "$pid" 2>/dev/null || true)
+  if [ -n "$children" ]; then
+    for child in $children; do
+      kill_pid_tree "$child"
+    done
+  fi
+  kill "$pid" 2>/dev/null || true
 }
 
 kill_port() {
@@ -70,10 +106,12 @@ kill_port() {
     return 1
   fi
   local pids
-  pids=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
+  pids=$(listener_pids_for_port "$port")
   if [ -n "$pids" ]; then
     echo "Stopping process(es) listening on port $port: $pids"
-    kill $pids || true
+    for pid in $pids; do
+      kill_pid_tree "$pid"
+    done
   fi
 }
 

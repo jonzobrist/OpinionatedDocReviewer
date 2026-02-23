@@ -38,7 +38,7 @@ capture_listener_pid() {
   local port="$1"
   local pid_file="$2"
   local pid
-  pid=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -n1 || true)
+  pid=$(listener_pids_for_port "$port" | head -n1 || true)
   if [ -n "$pid" ]; then
     echo "$pid" > "$pid_file"
   fi
