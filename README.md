@@ -98,6 +98,10 @@ Do not commit secrets.
 - Configure provider settings via the UI: `System` panel in `http://localhost:3000`.
 - Or configure via `backend/.env` / `backend/config.toml` (examples in `backend/.env.example` and `backend/config.example.toml`).
 - CORS is configurable in backend env/config; see `PRODUCT.md`.
+- Frontend API routing can be configured in root `.env`:
+  - `NEXT_PUBLIC_API_BASE` is the primary API base used by browser calls and Next rewrite.
+  - Optional `NEXT_SERVER_API_BASE` can override only the server rewrite target when needed.
+  - Example for reverse proxy: `NEXT_PUBLIC_API_BASE=https://odr.zlyxy.me/api`.
 
 ## Authentication (OIDC/JWT)
 
@@ -241,6 +245,19 @@ Operational safeguards:
 - Input guardrails cap source comments/groups for a single synthesis run.
 - If synthesis fails, API returns a clear error and fallback unsynthesized mode is available.
 - Meta runs log structured completion/failure entries with tenant/version/job context and duration.
+- Global dedupe merges near-duplicate directives using a configurable similarity threshold.
+
+### Meta Agent Settings (UI + Config)
+
+Meta reviewer behavior is fully editable in the `System` page (`/system`) and persisted to backend config.
+
+Editable fields:
+
+- Identity: `meta_agent_name`, `meta_agent_description`
+- Prompting: `meta_agent_system_prompt`, `meta_agent_focus_areas`, `meta_agent_tone`, `meta_agent_reference_notes`
+- Output policy: `meta_agent_output_format`, `meta_agent_output_max_bullets`
+- Output guards: `meta_agent_output_require_quote_excerpt`, `meta_agent_output_require_actionable`, `meta_agent_output_include_severity`
+- Examples + controls: `meta_agent_examples`, `meta_max_directives_per_group`, `meta_global_dedupe_threshold`
 
 ## GitHub Push Notes
 

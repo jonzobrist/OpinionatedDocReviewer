@@ -294,6 +294,16 @@ def _ensure_schema() -> None:
         _ensure_column(connection, "personas", "is_system_locked", "BOOLEAN DEFAULT 0")
         _ensure_column(connection, "personas", "sort_order", "INTEGER DEFAULT 100")
         _ensure_column(connection, "personas", "color_theme", "TEXT")
+        _ensure_column(connection, "meta_comments", "impact", "TEXT DEFAULT 'medium'")
+        _ensure_column(connection, "meta_comments", "effort", "TEXT DEFAULT 'medium'")
+        _ensure_column(connection, "meta_comments", "confidence", "REAL DEFAULT 0.5")
+        _ensure_column(connection, "meta_comments", "why_now", "TEXT")
+        _ensure_column(connection, "meta_comments", "recommended_change", "TEXT")
+        _ensure_column(connection, "meta_comments", "verification_step", "TEXT")
+        _ensure_column(connection, "meta_comments", "status", "TEXT DEFAULT 'open'")
+        _ensure_column(connection, "meta_comments", "assignee", "TEXT")
+        _ensure_column(connection, "meta_comments", "due_at", "TEXT")
+        _ensure_column(connection, "meta_comments", "rank_score", "REAL DEFAULT 0")
         connection.execute(
             text("UPDATE review_jobs SET trigger='auto' WHERE trigger IS NULL")
         )
@@ -323,6 +333,21 @@ def _ensure_schema() -> None:
         )
         connection.execute(
             text("UPDATE personas SET sort_order=100 WHERE sort_order IS NULL")
+        )
+        connection.execute(
+            text("UPDATE meta_comments SET impact='medium' WHERE impact IS NULL OR impact=''")
+        )
+        connection.execute(
+            text("UPDATE meta_comments SET effort='medium' WHERE effort IS NULL OR effort=''")
+        )
+        connection.execute(
+            text("UPDATE meta_comments SET confidence=0.5 WHERE confidence IS NULL")
+        )
+        connection.execute(
+            text("UPDATE meta_comments SET status='open' WHERE status IS NULL OR status=''")
+        )
+        connection.execute(
+            text("UPDATE meta_comments SET rank_score=0 WHERE rank_score IS NULL")
         )
         connection.commit()
 

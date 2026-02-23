@@ -37,6 +37,20 @@ def _read_settings() -> SystemConfigRead:
         cors_allow_methods=settings.CORS_ALLOW_METHODS,
         cors_allow_headers=settings.CORS_ALLOW_HEADERS,
         cors_max_age=settings.CORS_MAX_AGE,
+        meta_agent_name=settings.META_AGENT_NAME,
+        meta_agent_description=settings.META_AGENT_DESCRIPTION,
+        meta_agent_system_prompt=settings.META_AGENT_SYSTEM_PROMPT,
+        meta_agent_focus_areas=settings.META_AGENT_FOCUS_AREAS,
+        meta_agent_tone=settings.META_AGENT_TONE,
+        meta_agent_reference_notes=settings.META_AGENT_REFERENCE_NOTES,
+        meta_agent_output_format=settings.META_AGENT_OUTPUT_FORMAT,
+        meta_agent_output_max_bullets=settings.META_AGENT_OUTPUT_MAX_BULLETS,
+        meta_agent_output_require_quote_excerpt=settings.META_AGENT_OUTPUT_REQUIRE_QUOTE_EXCERPT,
+        meta_agent_output_require_actionable=settings.META_AGENT_OUTPUT_REQUIRE_ACTIONABLE,
+        meta_agent_output_include_severity=settings.META_AGENT_OUTPUT_INCLUDE_SEVERITY,
+        meta_agent_examples=settings.META_AGENT_EXAMPLES,
+        meta_max_directives_per_group=settings.META_MAX_DIRECTIVES_PER_GROUP,
+        meta_global_dedupe_threshold=settings.META_GLOBAL_DEDUPE_THRESHOLD,
         openai_api_key_set=_bool_set(settings.OPENAI_API_KEY),
         bedrock_access_key_set=_bool_set(settings.BEDROCK_AWS_ACCESS_KEY_ID),
         bedrock_secret_key_set=_bool_set(settings.BEDROCK_AWS_SECRET_ACCESS_KEY),
@@ -71,6 +85,24 @@ def update_settings(payload: SystemConfigUpdate, _: str = Depends(get_tenant_id)
     settings.CORS_ALLOW_METHODS = payload.cors_allow_methods
     settings.CORS_ALLOW_HEADERS = payload.cors_allow_headers
     settings.CORS_MAX_AGE = payload.cors_max_age
+    settings.META_AGENT_NAME = payload.meta_agent_name
+    settings.META_AGENT_DESCRIPTION = payload.meta_agent_description
+    settings.META_AGENT_SYSTEM_PROMPT = payload.meta_agent_system_prompt
+    settings.META_AGENT_FOCUS_AREAS = payload.meta_agent_focus_areas
+    settings.META_AGENT_TONE = payload.meta_agent_tone
+    settings.META_AGENT_REFERENCE_NOTES = (
+        payload.meta_agent_reference_notes.strip() if payload.meta_agent_reference_notes else None
+    )
+    settings.META_AGENT_OUTPUT_FORMAT = payload.meta_agent_output_format
+    settings.META_AGENT_OUTPUT_MAX_BULLETS = payload.meta_agent_output_max_bullets
+    settings.META_AGENT_OUTPUT_REQUIRE_QUOTE_EXCERPT = (
+        payload.meta_agent_output_require_quote_excerpt
+    )
+    settings.META_AGENT_OUTPUT_REQUIRE_ACTIONABLE = payload.meta_agent_output_require_actionable
+    settings.META_AGENT_OUTPUT_INCLUDE_SEVERITY = payload.meta_agent_output_include_severity
+    settings.META_AGENT_EXAMPLES = payload.meta_agent_examples
+    settings.META_MAX_DIRECTIVES_PER_GROUP = payload.meta_max_directives_per_group
+    settings.META_GLOBAL_DEDUPE_THRESHOLD = payload.meta_global_dedupe_threshold
 
     updates: dict[str, str | int | float | bool] = {
         "LLM_PROVIDER": settings.LLM_PROVIDER,
@@ -91,6 +123,20 @@ def update_settings(payload: SystemConfigUpdate, _: str = Depends(get_tenant_id)
         "CORS_ALLOW_METHODS": settings.CORS_ALLOW_METHODS,
         "CORS_ALLOW_HEADERS": settings.CORS_ALLOW_HEADERS,
         "CORS_MAX_AGE": settings.CORS_MAX_AGE,
+        "META_AGENT_NAME": settings.META_AGENT_NAME,
+        "META_AGENT_DESCRIPTION": settings.META_AGENT_DESCRIPTION,
+        "META_AGENT_SYSTEM_PROMPT": settings.META_AGENT_SYSTEM_PROMPT,
+        "META_AGENT_FOCUS_AREAS": settings.META_AGENT_FOCUS_AREAS,
+        "META_AGENT_TONE": settings.META_AGENT_TONE,
+        "META_AGENT_REFERENCE_NOTES": settings.META_AGENT_REFERENCE_NOTES or "",
+        "META_AGENT_OUTPUT_FORMAT": settings.META_AGENT_OUTPUT_FORMAT,
+        "META_AGENT_OUTPUT_MAX_BULLETS": settings.META_AGENT_OUTPUT_MAX_BULLETS,
+        "META_AGENT_OUTPUT_REQUIRE_QUOTE_EXCERPT": settings.META_AGENT_OUTPUT_REQUIRE_QUOTE_EXCERPT,
+        "META_AGENT_OUTPUT_REQUIRE_ACTIONABLE": settings.META_AGENT_OUTPUT_REQUIRE_ACTIONABLE,
+        "META_AGENT_OUTPUT_INCLUDE_SEVERITY": settings.META_AGENT_OUTPUT_INCLUDE_SEVERITY,
+        "META_AGENT_EXAMPLES": settings.META_AGENT_EXAMPLES,
+        "META_MAX_DIRECTIVES_PER_GROUP": settings.META_MAX_DIRECTIVES_PER_GROUP,
+        "META_GLOBAL_DEDUPE_THRESHOLD": settings.META_GLOBAL_DEDUPE_THRESHOLD,
     }
 
     if payload.openai_api_key is not None:

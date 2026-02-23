@@ -26,6 +26,16 @@ class MetaCommentRead(BaseModel):
     content: str
     category: str
     priority: str
+    impact: str
+    effort: str
+    confidence: float
+    why_now: str | None = None
+    recommended_change: str | None = None
+    verification_step: str | None = None
+    status: str
+    assignee: str | None = None
+    due_at: str | None = None
+    rank_score: float
     start_offset: int
     end_offset: int
     order_index: int

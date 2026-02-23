@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import List
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -173,6 +173,16 @@ class MetaComment(Base):
     content: Mapped[str] = mapped_column(Text)
     category: Mapped[str] = mapped_column(String(32), default="clarity")
     priority: Mapped[str] = mapped_column(String(16), default="medium")
+    impact: Mapped[str] = mapped_column(String(16), default="medium")
+    effort: Mapped[str] = mapped_column(String(16), default="medium")
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    why_now: Mapped[str | None] = mapped_column(String(600), default=None)
+    recommended_change: Mapped[str | None] = mapped_column(String(1000), default=None)
+    verification_step: Mapped[str | None] = mapped_column(String(1000), default=None)
+    status: Mapped[str] = mapped_column(String(32), default="open")
+    assignee: Mapped[str | None] = mapped_column(String(200), default=None)
+    due_at: Mapped[str | None] = mapped_column(String(64), default=None)
+    rank_score: Mapped[float] = mapped_column(Float, default=0.0)
     start_offset: Mapped[int] = mapped_column(Integer, default=0)
     end_offset: Mapped[int] = mapped_column(Integer, default=0)
     order_index: Mapped[int] = mapped_column(Integer, default=0)

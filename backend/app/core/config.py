@@ -103,6 +103,24 @@ class Settings(BaseSettings):
     OIDC_ROLES_CLAIM: str = "roles"
     OIDC_ADMIN_ROLE: str = "admin"
     OIDC_ALLOW_LOCAL_HEADER_FALLBACK: bool = True
+    META_AGENT_NAME: str = "Meta Reviewer"
+    META_AGENT_DESCRIPTION: str = "Synthesizes reviewer comments into ranked directives."
+    META_AGENT_SYSTEM_PROMPT: str = (
+        "Synthesize reviewer comments into concise, actionable directives for document improvement."
+    )
+    META_AGENT_FOCUS_AREAS: str = (
+        "deduplication,conflict resolution,actionability,prioritization,risk surfacing"
+    )
+    META_AGENT_TONE: str = "decisive, practical"
+    META_AGENT_REFERENCE_NOTES: str | None = None
+    META_AGENT_OUTPUT_FORMAT: str = "bullet_list"
+    META_AGENT_OUTPUT_MAX_BULLETS: int = 5
+    META_AGENT_OUTPUT_REQUIRE_QUOTE_EXCERPT: bool = False
+    META_AGENT_OUTPUT_REQUIRE_ACTIONABLE: bool = True
+    META_AGENT_OUTPUT_INCLUDE_SEVERITY: bool = True
+    META_AGENT_EXAMPLES: str = ""
+    META_MAX_DIRECTIVES_PER_GROUP: int = 5
+    META_GLOBAL_DEDUPE_THRESHOLD: float = 0.72
 
     model_config = SettingsConfigDict(
         env_file=(
@@ -149,6 +167,17 @@ class Settings(BaseSettings):
     @property
     def cors_allow_headers_list(self) -> list[str]:
         return parse_csv(self.CORS_ALLOW_HEADERS, ["*"])
+
+    @property
+    def meta_agent_focus_areas_list(self) -> list[str]:
+        return parse_csv(
+            self.META_AGENT_FOCUS_AREAS,
+            ["deduplication", "conflict resolution", "actionability", "prioritization"],
+        )
+
+    @property
+    def meta_agent_examples_list(self) -> list[str]:
+        return parse_csv(self.META_AGENT_EXAMPLES, [])
 
 
 settings = Settings()

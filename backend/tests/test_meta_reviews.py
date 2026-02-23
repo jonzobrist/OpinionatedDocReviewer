@@ -79,6 +79,15 @@ def test_meta_review_create_and_cache(client, monkeypatch) -> None:
             "content": "Rewrite authentication wording to specify exact token validation and expiration behavior.",
             "category": "security",
             "priority": "high",
+            "impact": "high",
+            "effort": "medium",
+            "confidence": 0.82,
+            "why_now": "This could cause incorrect token handling in production.",
+            "recommended_change": "Specify explicit validation and expiration rules.",
+            "verification_step": "Run token auth tests and confirm docs include exact rules.",
+            "status": "open",
+            "assignee": "auth-owner",
+            "due_at": "2026-03-01",
             "contributing_reviewers": ["A", "B"],
             "location": {"start_offset": 0, "end_offset": 28},
         }
@@ -100,6 +109,10 @@ def test_meta_review_create_and_cache(client, monkeypatch) -> None:
     assert body["is_synthesized"] is True
     assert len(body["comments"]) == 1
     assert body["comments"][0]["priority"] == "high"
+    assert body["comments"][0]["impact"] == "high"
+    assert body["comments"][0]["effort"] == "medium"
+    assert body["comments"][0]["status"] == "open"
+    assert body["comments"][0]["rank_score"] > 0
     assert len(body["comments"][0]["sources"]) >= 1
 
     create_again = client.post(
@@ -179,6 +192,15 @@ def test_meta_review_falls_back_when_selected_review_job_has_no_comments(client,
                     "content": "Tighten security details for token validation.",
                     "category": "security",
                     "priority": "high",
+                    "impact": "high",
+                    "effort": "low",
+                    "confidence": 0.9,
+                    "why_now": "Security ambiguity can lead to implementation gaps.",
+                    "recommended_change": "Define required checks and fallback behavior.",
+                    "verification_step": "Re-run reviewers to confirm no remaining security directives.",
+                    "status": "planned",
+                    "assignee": "security-owner",
+                    "due_at": None,
                     "contributing_reviewers": ["A"],
                     "location": {"start_offset": 0, "end_offset": 20},
                 }

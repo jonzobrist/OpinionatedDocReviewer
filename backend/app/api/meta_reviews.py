@@ -66,7 +66,7 @@ def create_meta_review(
     loaded = _load_run(db, tenant_id, run.id)
     if not loaded:
         raise HTTPException(status_code=500, detail="Failed to load synthesized run")
-    loaded.comments.sort(key=lambda item: (item.start_offset, item.order_index, item.id))
+    loaded.comments.sort(key=lambda item: (-item.rank_score, item.start_offset, item.order_index, item.id))
     return loaded
 
 
@@ -93,5 +93,5 @@ def get_latest_meta_review(
     run = query.first()
     if not run:
         raise HTTPException(status_code=404, detail="Meta review run not found")
-    run.comments.sort(key=lambda item: (item.start_offset, item.order_index, item.id))
+    run.comments.sort(key=lambda item: (-item.rank_score, item.start_offset, item.order_index, item.id))
     return run

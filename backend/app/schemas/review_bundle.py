@@ -61,6 +61,16 @@ class BundleMetaComment(BaseModel):
     content: str
     category: str = "clarity"
     priority: str = "medium"
+    impact: str = "medium"
+    effort: str = "medium"
+    confidence: float = 0.5
+    why_now: str | None = None
+    recommended_change: str | None = None
+    verification_step: str | None = None
+    status: str = "open"
+    assignee: str | None = None
+    due_at: str | None = None
+    rank_score: float = 0.0
     start_offset: int = 0
     end_offset: int = 0
     order_index: int = 0
@@ -98,4 +108,3 @@ class ReviewBundleImportResult(BaseModel):
     meta_comments_imported: int
 
     model_config = ConfigDict(from_attributes=True)
-
