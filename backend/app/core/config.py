@@ -103,6 +103,9 @@ class Settings(BaseSettings):
     OIDC_ROLES_CLAIM: str = "roles"
     OIDC_ADMIN_ROLE: str = "admin"
     OIDC_ALLOW_LOCAL_HEADER_FALLBACK: bool = True
+    ALLOWED_HOSTS: str = "*"
+    TRUST_PROXY_HEADERS: bool = False
+    PROXY_TRUSTED_IPS: str = "127.0.0.1"
 
     model_config = SettingsConfigDict(
         env_file=(
@@ -149,6 +152,14 @@ class Settings(BaseSettings):
     @property
     def cors_allow_headers_list(self) -> list[str]:
         return parse_csv(self.CORS_ALLOW_HEADERS, ["*"])
+
+    @property
+    def allowed_hosts_list(self) -> list[str]:
+        return parse_csv(self.ALLOWED_HOSTS, ["*"])
+
+    @property
+    def proxy_trusted_ips_list(self) -> list[str]:
+        return parse_csv(self.PROXY_TRUSTED_IPS, ["127.0.0.1"])
 
 
 settings = Settings()

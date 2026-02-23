@@ -16,7 +16,9 @@ python -m app.worker
 ```
 
 ## API Notes
-- All endpoints require `X-Tenant-Id` header (temporary placeholder for auth).
+- Auth is configurable:
+  - `AUTH_MODE=oidc`: requires `Authorization: Bearer <token>`
+  - `AUTH_MODE=header`: accepts `X-Tenant-Id` / `X-User-Email` headers
 - Port is configurable via `PORT` (default `8006`).
 - Configure provider via `LLM_PROVIDER=openai|bedrock`.
 - OpenAI: set `OPENAI_API_KEY`.
@@ -88,3 +90,29 @@ References:
 ```bash
 pytest
 ```
+
+## Reverse Proxy Deployment
+
+For deployments behind a reverse proxy (TLS at proxy, app local HTTP):
+
+```env
+ALLOWED_HOSTS=odr.zlyxy.me
+TRUST_PROXY_HEADERS=true
+PROXY_TRUSTED_IPS=*
+```
+
+Auth options:
+
+```env
+# Option A: simple non-IdP deployment
+AUTH_MODE=header
+
+# Option B: enterprise SSO/JWT
+# AUTH_MODE=oidc
+# OIDC_ISSUER_URL=...
+# OIDC_AUDIENCE=...
+# OIDC_JWKS_URL=...
+```
+
+If `AUTH_MODE=oidc` and no token is sent, API replies with:
+`{"detail":"Authorization bearer token is required"}`.

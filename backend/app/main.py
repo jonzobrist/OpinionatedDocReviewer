@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from app.api.routes import api_router
 from app.core.config import settings
 from app.db.init_db import init_db
@@ -16,6 +18,12 @@ def create_app(init_db_on_startup: bool = True) -> FastAPI:
         redoc_url=f"{settings.API_PREFIX}/redoc",
     )
 
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts_list)
+    if settings.TRUST_PROXY_HEADERS:
+        app.add_middleware(
+            ProxyHeadersMiddleware,
+            trusted_hosts=settings.proxy_trusted_ips_list,
+        )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_allow_origins_list,

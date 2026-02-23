@@ -44,3 +44,13 @@ OIDC_NAME_CLAIM = "name"
 OIDC_ROLES_CLAIM = "roles"
 OIDC_ADMIN_ROLE = "admin"
 OIDC_ALLOW_LOCAL_HEADER_FALLBACK = true
+ALLOWED_HOSTS = "*"
+TRUST_PROXY_HEADERS = false
+PROXY_TRUSTED_IPS = "127.0.0.1"
+
+# Reverse proxy examples:
+# ALLOWED_HOSTS = "odr.zlyxy.me"
+# ALLOWED_HOSTS = "*.zlyxy.me,zlyxy.me"
+# TRUST_PROXY_HEADERS = true
+# PROXY_TRUSTED_IPS = "10.0.0.10,127.0.0.1"
+# PROXY_TRUSTED_IPS = "*"

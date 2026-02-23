@@ -104,7 +104,7 @@ Do not commit secrets.
 Backend supports two auth modes:
 
 - `AUTH_MODE=oidc` (recommended for production)
-- `AUTH_MODE=header` (legacy/dev compatibility)
+- `AUTH_MODE=header` (simple deployment mode without external IdP)
 
 OIDC settings (`backend/.env` or `backend/config.toml`):
 
@@ -129,6 +129,15 @@ Frontend:
 
 The frontend sends `Authorization: Bearer <token>` on all API requests.
 
+Header auth mode (no IdP):
+
+```env
+AUTH_MODE=header
+```
+
+In `header` mode, the client uses `X-Tenant-Id`/`X-User-Email` headers and does
+not require a bearer token.
+
 For local development convenience, `OIDC_ALLOW_LOCAL_HEADER_FALLBACK=true` allows localhost requests without a bearer token to continue using legacy header identity. Set this to `false` in stricter environments.
 
 Security defaults now enabled:
@@ -136,6 +145,74 @@ Security defaults now enabled:
 - Rate limiting middleware is on by default (`RATE_LIMIT_ENABLED=true`)
 - CORS defaults are explicit (no wildcard methods/headers)
 - Default SQLite path is under `.run/app.db` (not project root)
+
+## Reverse Proxy Support
+
+Backend supports running behind a reverse proxy with configurable hostname and
+forwarded-header trust controls.
+
+Set in `backend/.env` or `backend/config.toml`:
+
+```env
+# Hostname enforcement ("*" allows any host)
+ALLOWED_HOSTS=*
+
+# Trust X-Forwarded-* headers from known proxy IPs
+TRUST_PROXY_HEADERS=true
+PROXY_TRUSTED_IPS=10.0.0.10,127.0.0.1
+```
+
+Common examples:
+
+```env
+# Only allow your public hostname
+ALLOWED_HOSTS=odr.zlyxy.me
+
+# Allow wildcard host routing
+ALLOWED_HOSTS=*.zlyxy.me,zlyxy.me
+
+# Trust forwarded headers from any proxy IP (only in controlled networks)
+PROXY_TRUSTED_IPS=*
+```
+
+When TLS terminates at the proxy and the app runs local HTTP, enabling
+`TRUST_PROXY_HEADERS=true` allows the app to correctly interpret upstream
+scheme/connection information (for example, `X-Forwarded-Proto: https`).
+
+Client API endpoint configuration:
+
+- Set `NEXT_PUBLIC_API_BASE` for the frontend (see `/Users/zob/src/OpinionatedDocReviewer/frontend/.env.example`).
+- If unset, the client uses `${window.location.origin}/api`, which works for same-origin reverse proxy setups.
+- Runtime override is available in UI: `System` -> `Client Connection` (stored in `localStorage` as `odr_api_base`).
+
+### Reverse Proxy Setup Examples
+
+Single-domain setup (frontend + backend behind one hostname, e.g. `https://odr.zlyxy.me`):
+
+- Reverse proxy routes:
+  - `/api/*` -> backend (`:8006`)
+  - default `/` -> frontend (`:3000`)
+- Frontend env:
+  - leave `NEXT_PUBLIC_API_BASE` unset (default `${window.location.origin}/api`)
+  - or explicitly set `NEXT_PUBLIC_API_BASE=https://odr.zlyxy.me/api`
+- Backend env:
+
+```env
+ALLOWED_HOSTS=odr.zlyxy.me
+TRUST_PROXY_HEADERS=true
+PROXY_TRUSTED_IPS=*
+
+# Choose one auth mode:
+AUTH_MODE=header
+# or:
+# AUTH_MODE=oidc
+```
+
+OIDC mode behind proxy:
+
+- Keep `AUTH_MODE=oidc` and configure `OIDC_*` values.
+- In UI, set `System` -> `Client Connection` -> `OIDC/JWT Access Token`.
+- If no token is provided, API calls return `{"detail":"Authorization bearer token is required"}`.
 
 ## Agent Import/Export Packs
 
