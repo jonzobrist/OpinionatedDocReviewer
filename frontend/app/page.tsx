@@ -992,8 +992,10 @@ function HomePageContent() {
   }
 
   function handleTenantSave() {
+    const resolvedApiBase =
+      apiBase.trim() || (typeof window !== 'undefined' ? `${window.location.origin}/api` : getApiBase());
     setTenantId(tenantId || DEFAULT_TENANT);
-    setApiBase(apiBase || 'http://localhost:8006/api');
+    setApiBase(resolvedApiBase);
     setAccessToken(accessToken);
     setStatusMessage('Connection settings saved.');
     void refreshAll();
@@ -1199,7 +1201,22 @@ function HomePageContent() {
         cors_allow_credentials: systemConfig.cors_allow_credentials,
         cors_allow_methods: systemConfig.cors_allow_methods,
         cors_allow_headers: systemConfig.cors_allow_headers,
-        cors_max_age: systemConfig.cors_max_age
+        cors_max_age: systemConfig.cors_max_age,
+        meta_agent_name: systemConfig.meta_agent_name,
+        meta_agent_description: systemConfig.meta_agent_description,
+        meta_agent_system_prompt: systemConfig.meta_agent_system_prompt,
+        meta_agent_focus_areas: systemConfig.meta_agent_focus_areas,
+        meta_agent_tone: systemConfig.meta_agent_tone,
+        meta_agent_reference_notes: systemConfig.meta_agent_reference_notes,
+        meta_agent_output_format: systemConfig.meta_agent_output_format,
+        meta_agent_output_max_bullets: systemConfig.meta_agent_output_max_bullets,
+        meta_agent_output_require_quote_excerpt:
+          systemConfig.meta_agent_output_require_quote_excerpt,
+        meta_agent_output_require_actionable: systemConfig.meta_agent_output_require_actionable,
+        meta_agent_output_include_severity: systemConfig.meta_agent_output_include_severity,
+        meta_agent_examples: systemConfig.meta_agent_examples,
+        meta_max_directives_per_group: systemConfig.meta_max_directives_per_group,
+        meta_global_dedupe_threshold: systemConfig.meta_global_dedupe_threshold
       };
       const next = await apiFetch<SystemConfigRead>('/settings', {
         method: 'PUT',
@@ -1242,6 +1259,21 @@ function HomePageContent() {
         cors_allow_methods: systemConfig.cors_allow_methods,
         cors_allow_headers: systemConfig.cors_allow_headers,
         cors_max_age: systemConfig.cors_max_age,
+        meta_agent_name: systemConfig.meta_agent_name,
+        meta_agent_description: systemConfig.meta_agent_description,
+        meta_agent_system_prompt: systemConfig.meta_agent_system_prompt,
+        meta_agent_focus_areas: systemConfig.meta_agent_focus_areas,
+        meta_agent_tone: systemConfig.meta_agent_tone,
+        meta_agent_reference_notes: systemConfig.meta_agent_reference_notes,
+        meta_agent_output_format: systemConfig.meta_agent_output_format,
+        meta_agent_output_max_bullets: systemConfig.meta_agent_output_max_bullets,
+        meta_agent_output_require_quote_excerpt:
+          systemConfig.meta_agent_output_require_quote_excerpt,
+        meta_agent_output_require_actionable: systemConfig.meta_agent_output_require_actionable,
+        meta_agent_output_include_severity: systemConfig.meta_agent_output_include_severity,
+        meta_agent_examples: systemConfig.meta_agent_examples,
+        meta_max_directives_per_group: systemConfig.meta_max_directives_per_group,
+        meta_global_dedupe_threshold: systemConfig.meta_global_dedupe_threshold,
         [field]: value
       };
       const next = await apiFetch<SystemConfigRead>('/settings', {
@@ -1495,6 +1527,8 @@ function HomePageContent() {
     return subset
       .slice()
       .sort((a, b) => {
+        const scoreDelta = (b.rank_score ?? 0) - (a.rank_score ?? 0);
+        if (scoreDelta !== 0) return scoreDelta;
         if (a.start_offset !== b.start_offset) return a.start_offset - b.start_offset;
         const rankDelta = (priorityRank[b.priority] ?? 0) - (priorityRank[a.priority] ?? 0);
         if (rankDelta !== 0) return rankDelta;
@@ -2199,6 +2233,16 @@ function HomePageContent() {
               content: metaComment.content,
               category: metaComment.category,
               priority: metaComment.priority,
+              impact: metaComment.impact,
+              effort: metaComment.effort,
+              confidence: metaComment.confidence,
+              why_now: metaComment.why_now,
+              recommended_change: metaComment.recommended_change,
+              verification_step: metaComment.verification_step,
+              status: metaComment.status,
+              assignee: metaComment.assignee,
+              due_at: metaComment.due_at,
+              rank_score: metaComment.rank_score,
               start_offset: metaComment.start_offset,
               end_offset: metaComment.end_offset,
               order_index: metaComment.order_index,
@@ -2886,12 +2930,30 @@ function HomePageContent() {
                       </div>
                       <div className="meta-tags">
                         <span className="meta-pill">{metaComment.category}</span>
+                        <span className="meta-pill">impact {metaComment.impact}</span>
+                        <span className="meta-pill">effort {metaComment.effort}</span>
+                        <span className="meta-pill">
+                          conf {(metaComment.confidence * 100).toFixed(0)}%
+                        </span>
+                        <span className="meta-pill">score {metaComment.rank_score.toFixed(2)}</span>
+                        <span className="meta-pill">status {metaComment.status}</span>
                         <span className="meta-pill">
                           {metaComment.start_offset}-{metaComment.end_offset}
                         </span>
                         {!metaReviewRun?.is_synthesized && <span className="meta-pill">fallback</span>}
                       </div>
                       <div className="comment-text">{metaComment.content}</div>
+                      {(metaComment.why_now || metaComment.recommended_change || metaComment.verification_step) && (
+                        <div className="comment-source-preview">
+                          {metaComment.why_now && <div><strong>Why now:</strong> {metaComment.why_now}</div>}
+                          {metaComment.recommended_change && (
+                            <div><strong>Change:</strong> {metaComment.recommended_change}</div>
+                          )}
+                          {metaComment.verification_step && (
+                            <div><strong>Verify:</strong> {metaComment.verification_step}</div>
+                          )}
+                        </div>
+                      )}
                       <details className="comment-source">
                         <summary>Show sources ({metaComment.sources.length})</summary>
                         <div className="meta-sources">
@@ -2994,6 +3056,12 @@ function HomePageContent() {
                     </div>
                     <div className="meta-tags">
                       <span className="meta-pill">{floatingMetaComment.category}</span>
+                      <span className="meta-pill">impact {floatingMetaComment.impact}</span>
+                      <span className="meta-pill">effort {floatingMetaComment.effort}</span>
+                      <span className="meta-pill">
+                        conf {(floatingMetaComment.confidence * 100).toFixed(0)}%
+                      </span>
+                      <span className="meta-pill">score {floatingMetaComment.rank_score.toFixed(2)}</span>
                       <span className="meta-pill">
                         {floatingMetaComment.start_offset}-{floatingMetaComment.end_offset}
                       </span>
@@ -4587,13 +4655,240 @@ function HomePageContent() {
                 </section>
 
                 <section className="system-card">
+                  <div className="drawer-title">Meta Agent</div>
+                  <label className="subtle">Name</label>
+                  <input
+                    className="input"
+                    value={systemConfig.meta_agent_name}
+                    onChange={(event) =>
+                      setSystemConfig((prev) =>
+                        prev ? { ...prev, meta_agent_name: event.target.value } : prev
+                      )
+                    }
+                    placeholder="Meta Reviewer"
+                  />
+                  <div className="spacer" />
+                  <label className="subtle">Description</label>
+                  <input
+                    className="input"
+                    value={systemConfig.meta_agent_description}
+                    onChange={(event) =>
+                      setSystemConfig((prev) =>
+                        prev ? { ...prev, meta_agent_description: event.target.value } : prev
+                      )
+                    }
+                    placeholder="Synthesizes reviewer comments into ranked directives."
+                  />
+                  <div className="spacer" />
+                  <label className="subtle">System Prompt</label>
+                  <textarea
+                    className="input textarea"
+                    rows={4}
+                    value={systemConfig.meta_agent_system_prompt}
+                    onChange={(event) =>
+                      setSystemConfig((prev) =>
+                        prev ? { ...prev, meta_agent_system_prompt: event.target.value } : prev
+                      )
+                    }
+                  />
+                  <div className="spacer" />
+                  <label className="subtle">Focus Areas (comma separated)</label>
+                  <input
+                    className="input"
+                    value={systemConfig.meta_agent_focus_areas}
+                    onChange={(event) =>
+                      setSystemConfig((prev) =>
+                        prev ? { ...prev, meta_agent_focus_areas: event.target.value } : prev
+                      )
+                    }
+                    placeholder="deduplication,conflict resolution,actionability"
+                  />
+                  <div className="grid-two">
+                    <div>
+                      <label className="subtle">Tone</label>
+                      <input
+                        className="input"
+                        value={systemConfig.meta_agent_tone}
+                        onChange={(event) =>
+                          setSystemConfig((prev) =>
+                            prev ? { ...prev, meta_agent_tone: event.target.value } : prev
+                          )
+                        }
+                        placeholder="decisive, practical"
+                      />
+                    </div>
+                    <div>
+                      <label className="subtle">Output Format</label>
+                      <input
+                        className="input"
+                        value={systemConfig.meta_agent_output_format}
+                        onChange={(event) =>
+                          setSystemConfig((prev) =>
+                            prev ? { ...prev, meta_agent_output_format: event.target.value } : prev
+                          )
+                        }
+                        placeholder="bullet_list"
+                      />
+                    </div>
+                  </div>
+                  <div className="spacer" />
+                  <label className="subtle">Reference Notes (optional)</label>
+                  <textarea
+                    className="input textarea"
+                    rows={3}
+                    value={systemConfig.meta_agent_reference_notes ?? ''}
+                    onChange={(event) =>
+                      setSystemConfig((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              meta_agent_reference_notes: event.target.value.trim() || null
+                            }
+                          : prev
+                      )
+                    }
+                  />
+                  <div className="spacer" />
+                  <label className="subtle">Examples (comma separated)</label>
+                  <input
+                    className="input"
+                    value={systemConfig.meta_agent_examples}
+                    onChange={(event) =>
+                      setSystemConfig((prev) =>
+                        prev ? { ...prev, meta_agent_examples: event.target.value } : prev
+                      )
+                    }
+                    placeholder="Use active voice,Always include next action"
+                  />
+                  <div className="grid-two">
+                    <div>
+                      <label className="subtle">Max bullets</label>
+                      <input
+                        className="input"
+                        type="number"
+                        value={systemConfig.meta_agent_output_max_bullets}
+                        onChange={(event) =>
+                          setSystemConfig((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  meta_agent_output_max_bullets: Math.max(
+                                    1,
+                                    Number(event.target.value) || 1
+                                  )
+                                }
+                              : prev
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="subtle">Max directives per group</label>
+                      <input
+                        className="input"
+                        type="number"
+                        value={systemConfig.meta_max_directives_per_group}
+                        onChange={(event) =>
+                          setSystemConfig((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  meta_max_directives_per_group: Math.max(
+                                    1,
+                                    Number(event.target.value) || 1
+                                  )
+                                }
+                              : prev
+                          )
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="spacer" />
+                  <label className="subtle">Global dedupe threshold (0-1)</label>
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    max={1}
+                    value={systemConfig.meta_global_dedupe_threshold}
+                    onChange={(event) =>
+                      setSystemConfig((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              meta_global_dedupe_threshold: Math.min(
+                                1,
+                                Math.max(0, Number(event.target.value) || 0)
+                              )
+                            }
+                          : prev
+                      )
+                    }
+                  />
+                  <div className="spacer" />
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={systemConfig.meta_agent_output_require_actionable}
+                      onChange={(event) =>
+                        setSystemConfig((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                meta_agent_output_require_actionable: event.target.checked
+                              }
+                            : prev
+                        )
+                      }
+                    />
+                    Require actionable directives
+                  </label>
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={systemConfig.meta_agent_output_require_quote_excerpt}
+                      onChange={(event) =>
+                        setSystemConfig((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                meta_agent_output_require_quote_excerpt: event.target.checked
+                              }
+                            : prev
+                        )
+                      }
+                    />
+                    Require quote excerpts
+                  </label>
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={systemConfig.meta_agent_output_include_severity}
+                      onChange={(event) =>
+                        setSystemConfig((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                meta_agent_output_include_severity: event.target.checked
+                              }
+                            : prev
+                        )
+                      }
+                    />
+                    Include severity/priority guidance
+                  </label>
+                </section>
+
+                <section className="system-card">
                   <div className="drawer-title">Client Connection</div>
                   <label className="subtle">API Base</label>
                   <input
                     className="input"
                     value={apiBase}
                     onChange={(event) => setApiBaseState(event.target.value)}
-                    placeholder="http://localhost:8006/api"
+                    placeholder="https://odr.zlyxy.me/api"
                   />
                   <div className="spacer" />
                   <label className="subtle">Tenant ID</label>

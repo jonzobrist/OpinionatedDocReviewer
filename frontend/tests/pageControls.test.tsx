@@ -231,6 +231,20 @@ describe('page controls', () => {
           cors_allow_methods: '*',
           cors_allow_headers: '*',
           cors_max_age: 600,
+          meta_agent_name: 'Meta Reviewer',
+          meta_agent_description: 'Synthesizes reviewer comments into ranked directives.',
+          meta_agent_system_prompt: 'Synthesize reviewer comments into concise actions.',
+          meta_agent_focus_areas: 'deduplication,conflict resolution,actionability',
+          meta_agent_tone: 'decisive, practical',
+          meta_agent_reference_notes: null,
+          meta_agent_output_format: 'bullet_list',
+          meta_agent_output_max_bullets: 5,
+          meta_agent_output_require_quote_excerpt: false,
+          meta_agent_output_require_actionable: true,
+          meta_agent_output_include_severity: true,
+          meta_agent_examples: '',
+          meta_max_directives_per_group: 5,
+          meta_global_dedupe_threshold: 0.72,
           openai_api_key_set: false,
           bedrock_access_key_set: false,
           bedrock_secret_key_set: false,
@@ -258,6 +272,26 @@ describe('page controls', () => {
           cors_allow_methods: body.cors_allow_methods ?? '*',
           cors_allow_headers: body.cors_allow_headers ?? '*',
           cors_max_age: body.cors_max_age ?? 600,
+          meta_agent_name: body.meta_agent_name ?? 'Meta Reviewer',
+          meta_agent_description:
+            body.meta_agent_description ?? 'Synthesizes reviewer comments into ranked directives.',
+          meta_agent_system_prompt:
+            body.meta_agent_system_prompt ?? 'Synthesize reviewer comments into concise actions.',
+          meta_agent_focus_areas:
+            body.meta_agent_focus_areas ?? 'deduplication,conflict resolution,actionability',
+          meta_agent_tone: body.meta_agent_tone ?? 'decisive, practical',
+          meta_agent_reference_notes: body.meta_agent_reference_notes ?? null,
+          meta_agent_output_format: body.meta_agent_output_format ?? 'bullet_list',
+          meta_agent_output_max_bullets: body.meta_agent_output_max_bullets ?? 5,
+          meta_agent_output_require_quote_excerpt:
+            body.meta_agent_output_require_quote_excerpt ?? false,
+          meta_agent_output_require_actionable:
+            body.meta_agent_output_require_actionable ?? true,
+          meta_agent_output_include_severity:
+            body.meta_agent_output_include_severity ?? true,
+          meta_agent_examples: body.meta_agent_examples ?? '',
+          meta_max_directives_per_group: body.meta_max_directives_per_group ?? 5,
+          meta_global_dedupe_threshold: body.meta_global_dedupe_threshold ?? 0.72,
           openai_api_key_set: false,
           bedrock_access_key_set: false,
           bedrock_secret_key_set: false,
@@ -464,7 +498,7 @@ describe('page controls', () => {
   it('saves system settings to localStorage', async () => {
     mockPathname = '/system';
     render(<HomePage />);
-    const apiInput = await screen.findByPlaceholderText('http://localhost:8006/api');
+    const apiInput = await screen.findByPlaceholderText('https://odr.zlyxy.me/api');
     const tenantInput = await screen.findByPlaceholderText('local-dev');
 
     fireEvent.change(apiInput, { target: { value: 'https://opinion.zlyxy.me/api' } });
