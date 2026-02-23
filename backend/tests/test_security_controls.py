@@ -1,6 +1,9 @@
 from fastapi import HTTPException
 
+from fastapi.testclient import TestClient
+
 from app.core.config import settings
+from app.main import create_app
 from app.reviews.git_repo import ensure_repo
 
 
@@ -38,3 +41,27 @@ def test_csrf_origin_guard_blocks_untrusted_origin(client, monkeypatch) -> None:
     response = client.post("/api/documents", json={"title": "Doc"}, headers=headers)
     assert response.status_code == 403
     assert response.json()["detail"] == "Origin not allowed"
+
+
+def test_csrf_origin_guard_accepts_normalized_origin_forms(client, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "CSRF_ENFORCE_ORIGIN", True)
+    monkeypatch.setattr(settings, "CORS_ALLOW_ORIGINS", "odr.zlyxy.me/")
+    headers = {
+        "X-Tenant-Id": "tenant-csrf-ok",
+        "Origin": "https://odr.zlyxy.me",
+    }
+    response = client.post("/api/documents", json={"title": "Doc"}, headers=headers)
+    assert response.status_code == 201
+
+
+def test_cors_preflight_accepts_normalized_origin_forms(client, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "CORS_ALLOW_ORIGINS", "odr.zlyxy.me/")
+    app = create_app(init_db_on_startup=False)
+    scoped = TestClient(app)
+    headers = {
+        "Origin": "https://odr.zlyxy.me",
+        "Access-Control-Request-Method": "GET",
+    }
+    response = scoped.options("/api/status", headers=headers)
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "https://odr.zlyxy.me"

@@ -1,7 +1,8 @@
-from pathlib import Path
 import os
+from pathlib import Path
 import tomllib
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -52,6 +53,21 @@ def parse_csv(value: str | list[str] | None, default: list[str]) -> list[str]:
         return [item for item in (item.strip() for item in value) if item]
     items = [item.strip() for item in value.split(",")]
     return [item for item in items if item]
+
+
+def normalize_origin(value: str) -> str:
+    origin = (value or "").strip()
+    if not origin or origin == "*":
+        return origin
+    origin = origin.rstrip("/")
+    parsed = urlsplit(origin)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+
+    # Accept hostname[:port] entries and default to https in non-local deployments.
+    if origin.startswith(("localhost", "127.", "[::1]")):
+        return f"http://{origin}"
+    return f"https://{origin}"
 
 
 class Settings(BaseSettings):
@@ -136,14 +152,17 @@ class Settings(BaseSettings):
 
     @property
     def cors_allow_origins_list(self) -> list[str]:
-        return parse_csv(
-            self.CORS_ALLOW_ORIGINS,
-            [
-                "http://localhost:3000",
-                "http://127.0.0.1:3000",
-                "https://opinion.zlyxy.me",
-            ],
-        )
+        return [
+            normalize_origin(item)
+            for item in parse_csv(
+                self.CORS_ALLOW_ORIGINS,
+                [
+                    "http://localhost:3000",
+                    "http://127.0.0.1:3000",
+                    "https://opinion.zlyxy.me",
+                ],
+            )
+        ]
 
     @property
     def cors_allow_methods_list(self) -> list[str]:
