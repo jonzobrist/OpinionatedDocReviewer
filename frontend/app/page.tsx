@@ -2167,10 +2167,11 @@ function HomePageContent() {
     };
   }
 
-  function buildReviewBundleJson() {
+  function buildReviewBundleJson(metaRunOverride?: MetaReviewRunRead | null) {
     if (!selectedVersion) return null;
     const context = buildCommentExportContext();
     if (!context) return null;
+    const runForBundle = metaRunOverride !== undefined ? metaRunOverride : metaReviewRun;
     const comments = context.sorted.map((comment) => ({
       id: comment.id,
       persona_id: comment.persona_id,
@@ -2221,15 +2222,15 @@ function HomePageContent() {
         : null,
       personas: personasForBundle,
       comments,
-      meta_review_run: metaReviewRun
+      meta_review_run: runForBundle
         ? {
-            status: metaReviewRun.status,
-            is_synthesized: metaReviewRun.is_synthesized,
-            provider: metaReviewRun.provider,
-            model: metaReviewRun.model,
-            error_message: metaReviewRun.error_message,
-            created_at: metaReviewRun.created_at,
-            comments: metaReviewRun.comments.map((metaComment) => ({
+            status: runForBundle.status,
+            is_synthesized: runForBundle.is_synthesized,
+            provider: runForBundle.provider,
+            model: runForBundle.model,
+            error_message: runForBundle.error_message,
+            created_at: runForBundle.created_at,
+            comments: runForBundle.comments.map((metaComment) => ({
               content: metaComment.content,
               category: metaComment.category,
               priority: metaComment.priority,
@@ -2257,6 +2258,45 @@ function HomePageContent() {
           }
         : null
     };
+  }
+
+  async function resolveMetaReviewForExport(
+    versionId: number,
+    reviewJobId?: number | null
+  ): Promise<MetaReviewRunRead | null> {
+    if (
+      metaReviewRun &&
+      metaReviewRun.document_version_id === versionId &&
+      (reviewJobId ?? null) === (metaReviewRun.review_job_id ?? null)
+    ) {
+      return metaReviewRun;
+    }
+
+    const scopedQuery = reviewJobId
+      ? `/meta-reviews/latest?document_version_id=${versionId}&review_job_id=${reviewJobId}`
+      : `/meta-reviews/latest?document_version_id=${versionId}`;
+    try {
+      return await apiFetch<MetaReviewRunRead>(scopedQuery);
+    } catch (error) {
+      const message = normalizeError(error).toLowerCase();
+      const missing = message.includes('404') || message.includes('not found');
+      if (!missing) {
+        throw error;
+      }
+      if (!reviewJobId) {
+        return null;
+      }
+    }
+
+    try {
+      return await apiFetch<MetaReviewRunRead>(`/meta-reviews/latest?document_version_id=${versionId}`);
+    } catch (error) {
+      const message = normalizeError(error).toLowerCase();
+      if (message.includes('404') || message.includes('not found')) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   function buildCommentsMarkdown() {
@@ -2289,9 +2329,19 @@ function HomePageContent() {
     if (!selectedVersion) return;
     const context = buildCommentExportContext();
     const commentsJson = buildCommentsJson();
-    const reviewBundle = buildReviewBundleJson();
     const commentsMd = buildCommentsMarkdown();
-    if (!context || !commentsJson || !commentsMd || !reviewBundle) return;
+    if (!context || !commentsJson || !commentsMd) return;
+
+    let metaRunForBundle: MetaReviewRunRead | null = null;
+    try {
+      metaRunForBundle = await resolveMetaReviewForExport(selectedVersion.id, selectedReviewJobId);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+      return;
+    }
+
+    const reviewBundle = buildReviewBundleJson(metaRunForBundle);
+    if (!reviewBundle) return;
 
     const zip = new JSZip();
     const docHeader = [
