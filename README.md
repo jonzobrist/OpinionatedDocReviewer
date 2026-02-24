@@ -19,6 +19,50 @@ OpinionatedDocReviewer is a document review application that runs multiple AI pe
 - Local persistence: SQLite (current local dev setup)
 - Document/review artifact history: Git-backed local repos under `.run/doc-repos`
 
+## Architecture Diagrams
+
+### Agents + Meta Agent
+
+```mermaid
+flowchart TD
+    A["User uploads/selects document version"] --> B["Review Job created (/api/review-jobs)"]
+    B --> C["Worker dequeues job (RQ/Redis)"]
+    C --> D["Load active personas (agents)"]
+    D --> E["For each persona: build prompt from persona config"]
+    E --> F["Call LLM provider (OpenAI/Bedrock)"]
+    F --> G["Parse persona output into anchored comments"]
+    G --> H["Persist comments (persona_id, offsets, text, metadata)"]
+    H --> I["Meta review requested (/api/meta-reviews)"]
+    I --> J["Group comments by nearby offsets"]
+    J --> K["Meta prompt built from Meta Agent settings"]
+    K --> L["Meta LLM synthesis per group"]
+    L --> M["Normalize directives (priority, impact, effort, confidence, etc.)"]
+    M --> N["Global dedupe + rank scoring"]
+    N --> O["Persist meta comments + source mappings"]
+    O --> P["UI shows ranked meta directives and source traces"]
+```
+
+### End-to-End Review Flow
+
+```mermaid
+flowchart LR
+    A["Document file (.md/.txt)"] --> B["Create Document (/api/documents)"]
+    B --> C["Create Version (/api/documents/:id/versions)"]
+    C --> D["Queue Review Job (/api/review-jobs)"]
+    D --> E["Worker processes job"]
+    E --> F["Persona comments persisted (/api/comments)"]
+    F --> G["Frontend polling/refresh"]
+    G --> H["Document viewer + inline highlights"]
+    G --> I["Comment feed (by persona)"]
+    F --> J["Meta Review run (/api/meta-reviews)"]
+    J --> K["Meta directives persisted"]
+    K --> L["Meta view (ranked directives + sources)"]
+    C --> M["Git history + version timeline"]
+    B --> N["Library entry (needs review/reviewed/archived)"]
+    L --> O["User edits/re-uploads as new version"]
+    O --> C
+```
+
 ## Quick Start
 
 ### 1. Start dependencies
