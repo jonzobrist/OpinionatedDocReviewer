@@ -19,6 +19,10 @@ from app.schemas.admin import (
     DocumentPermissionCreate,
     DocumentPermissionRead,
     DocumentPermissionUpdate,
+    ResourcePolicyCreate,
+    ResourcePolicyRead,
+    ResourcePolicyUpdate,
+    PolicyDecisionLogRead,
 )
 from app.core.config import settings
 from app.security.roles import ADMIN_ROLES
@@ -226,6 +230,7 @@ def create_user(
         name=payload.name,
         email=payload.email,
         role=payload.role,
+        tags=payload.tags,
         is_active=payload.is_active,
     )
     db.add(user)
@@ -463,6 +468,104 @@ def delete_permission(
     )
     db.delete(perm)
     db.commit()
+
+
+@router.get("/policies", response_model=list[ResourcePolicyRead])
+def list_policies(
+    resource_type: str | None = Query(default=None),
+    action: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+) -> list[models.ResourcePolicy]:
+    query = db.query(models.ResourcePolicy).filter(models.ResourcePolicy.tenant_id == tenant_id)
+    if resource_type:
+        query = query.filter(models.ResourcePolicy.resource_type == resource_type)
+    if action:
+        query = query.filter(models.ResourcePolicy.action == action)
+    return query.order_by(models.ResourcePolicy.id.desc()).all()
+
+
+@router.post("/policies", response_model=ResourcePolicyRead, status_code=201)
+def create_policy(
+    payload: ResourcePolicyCreate,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    admin_user: models.User = Depends(require_admin_user),
+) -> models.ResourcePolicy:
+    policy = models.ResourcePolicy(
+        tenant_id=tenant_id,
+        name=payload.name,
+        effect=payload.effect,
+        action=payload.action,
+        resource_type=payload.resource_type,
+        resource_id=payload.resource_id,
+        conditions=payload.conditions,
+        is_active=payload.is_active,
+    )
+    db.add(policy)
+    _log_admin_action(
+        db,
+        tenant_id,
+        admin_user,
+        action="policy.create",
+        target_type="policy",
+        target_id=None,
+        details=f"name={payload.name},effect={payload.effect},action={payload.action}",
+    )
+    db.commit()
+    db.refresh(policy)
+    return policy
+
+
+@router.patch("/policies/{policy_id}", response_model=ResourcePolicyRead)
+def update_policy(
+    policy_id: int,
+    payload: ResourcePolicyUpdate,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    admin_user: models.User = Depends(require_admin_user),
+) -> models.ResourcePolicy:
+    policy = (
+        db.query(models.ResourcePolicy)
+        .filter(models.ResourcePolicy.tenant_id == tenant_id, models.ResourcePolicy.id == policy_id)
+        .first()
+    )
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    update_data = payload.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(policy, key, value)
+    _log_admin_action(
+        db,
+        tenant_id,
+        admin_user,
+        action="policy.update",
+        target_type="policy",
+        target_id=policy.id,
+        details=",".join(f"{k}={v}" for k, v in update_data.items()),
+    )
+    db.commit()
+    db.refresh(policy)
+    return policy
+
+
+@router.get("/policy-decisions", response_model=list[PolicyDecisionLogRead])
+def list_policy_decisions(
+    user_id: int | None = Query(default=None),
+    document_id: int | None = Query(default=None),
+    outcome: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+) -> list[models.PolicyDecisionLog]:
+    query = db.query(models.PolicyDecisionLog).filter(models.PolicyDecisionLog.tenant_id == tenant_id)
+    if user_id is not None:
+        query = query.filter(models.PolicyDecisionLog.user_id == user_id)
+    if document_id is not None:
+        query = query.filter(models.PolicyDecisionLog.document_id == document_id)
+    if outcome:
+        query = query.filter(models.PolicyDecisionLog.outcome == outcome)
+    return query.order_by(models.PolicyDecisionLog.id.desc()).limit(limit).all()
 
 
 @router.get("/actions", response_model=list[AdminActionRead])

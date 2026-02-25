@@ -6,7 +6,7 @@ from app.schemas.document import DocumentCreate, DocumentUpdate
 
 
 def create_document(db: Session, tenant_id: str, data: DocumentCreate) -> models.Document:
-    doc = models.Document(tenant_id=tenant_id, title=data.title)
+    doc = models.Document(tenant_id=tenant_id, title=data.title, tags=list(data.tags or []))
     db.add(doc)
     db.commit()
     db.refresh(doc)

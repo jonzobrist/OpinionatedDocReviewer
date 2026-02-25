@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class DocumentBase(BaseModel):
     title: str = Field(min_length=1, max_length=300)
+    tags: list[str] = Field(default_factory=list)
 
 
 class DocumentCreate(DocumentBase):
@@ -13,6 +14,7 @@ class DocumentCreate(DocumentBase):
 
 class DocumentUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
+    tags: list[str] | None = None
 
 
 class DocumentArchiveUpdate(BaseModel):

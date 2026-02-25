@@ -281,6 +281,7 @@ def _ensure_schema() -> None:
             "is_archived",
             "BOOLEAN DEFAULT 0",
         )
+        _ensure_column(connection, "documents", "tags", "JSON")
         _ensure_column(
             connection,
             "documents",
@@ -295,6 +296,7 @@ def _ensure_schema() -> None:
         _ensure_column(connection, "personas", "sort_order", "INTEGER DEFAULT 100")
         _ensure_column(connection, "personas", "color_theme", "TEXT")
         _ensure_column(connection, "users", "account_state", "TEXT DEFAULT 'active'")
+        _ensure_column(connection, "users", "tags", "JSON")
         _ensure_column(connection, "users", "email_verified_at", "DATETIME")
         _ensure_column(connection, "users", "last_login_at", "DATETIME")
         _ensure_column(connection, "meta_comments", "impact", "TEXT DEFAULT 'medium'")
@@ -320,6 +322,9 @@ def _ensure_schema() -> None:
             text("UPDATE documents SET is_archived=0 WHERE is_archived IS NULL")
         )
         connection.execute(
+            text("UPDATE documents SET tags='[]' WHERE tags IS NULL OR tags=''")
+        )
+        connection.execute(
             text("UPDATE comments SET output_metadata='{}' WHERE output_metadata IS NULL OR output_metadata=''")
         )
         connection.execute(
@@ -339,6 +344,9 @@ def _ensure_schema() -> None:
         )
         connection.execute(
             text("UPDATE users SET account_state='active' WHERE account_state IS NULL OR account_state=''")
+        )
+        connection.execute(
+            text("UPDATE users SET tags='[]' WHERE tags IS NULL OR tags=''")
         )
         connection.execute(
             text("UPDATE meta_comments SET impact='medium' WHERE impact IS NULL OR impact=''")

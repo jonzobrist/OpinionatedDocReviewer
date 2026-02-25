@@ -56,6 +56,7 @@ class Document(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
     title: Mapped[str] = mapped_column(String(300), index=True)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     created_at: Mapped[datetime] = mapped_column(
@@ -227,6 +228,7 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(200), index=True)
     email: Mapped[str] = mapped_column(String(320), index=True)
     role: Mapped[str] = mapped_column(String(32), default="default")
+    tags: Mapped[list] = mapped_column(JSON, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     account_state: Mapped[str] = mapped_column(String(32), default="active")
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
@@ -348,6 +350,42 @@ class AuthMfaChallenge(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class ResourcePolicy(Base):
+    __tablename__ = "resource_policies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(200), index=True)
+    effect: Mapped[str] = mapped_column(String(16), default="deny")
+    action: Mapped[str] = mapped_column(String(64), default="document.read", index=True)
+    resource_type: Mapped[str] = mapped_column(String(64), default="document", index=True)
+    resource_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    conditions: Mapped[dict] = mapped_column(JSON, default=dict)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class PolicyDecisionLog(Base):
+    __tablename__ = "policy_decision_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    document_id: Mapped[int | None] = mapped_column(Integer, index=True, default=None)
+    action: Mapped[str] = mapped_column(String(64), index=True)
+    requested_level: Mapped[str] = mapped_column(String(32), default="viewer")
+    base_level: Mapped[str | None] = mapped_column(String(32), default=None)
+    final_level: Mapped[str | None] = mapped_column(String(32), default=None)
+    outcome: Mapped[str] = mapped_column(String(32), default="denied", index=True)
+    matched_policy_ids: Mapped[list] = mapped_column(JSON, default=list)
+    details: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )

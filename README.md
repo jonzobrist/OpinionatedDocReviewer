@@ -206,6 +206,19 @@ Endpoints:
 - `POST /api/auth/mfa/verify`
 - `POST /api/auth/reset-password`
 
+Phase 2 authorization controls (admin):
+
+- `GET /api/admin/policies`
+- `POST /api/admin/policies`
+- `PATCH /api/admin/policies/{id}`
+- `GET /api/admin/policy-decisions`
+
+Policy behavior:
+
+- Explicit `deny` policies override role grants and document ACL allows.
+- Policies can match on role plus `user_tags_any` and `document_tags_any` conditions.
+- Each document permission check writes a decision entry for auditing.
+
 For local development convenience, `OIDC_ALLOW_LOCAL_HEADER_FALLBACK=true` allows localhost requests without a bearer token to continue using legacy header identity. Set this to `false` in stricter environments.
 
 Security defaults now enabled:

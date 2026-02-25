@@ -47,7 +47,7 @@ def list_all(
     return [
         doc
         for doc in docs
-        if get_effective_document_permission(db, tenant_id, current_user, doc.id) is not None
+        if get_effective_document_permission(db, tenant_id, current_user, doc.id)[0] is not None
     ]
 
 
@@ -67,7 +67,7 @@ def list_library(
             tenant_id,
             current_user,
             entry["id"] if isinstance(entry, dict) else entry.id,
-        )
+        )[0]
         is not None
     ]
 

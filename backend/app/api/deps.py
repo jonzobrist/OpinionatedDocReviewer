@@ -13,6 +13,11 @@ from app.db import models
 from app.db.init_db import seed_default_admin_user
 from app.db.session import SessionLocal
 from app.security.roles import is_admin_role
+from app.security.policy_engine import (
+    PERM_RANK,
+    action_for_minimum,
+    evaluate_document_policies,
+)
 from app.security.tenant import validate_tenant_id
 
 
@@ -249,7 +254,26 @@ def require_admin_user(context: AuthContext = Depends(get_auth_context)) -> mode
     return user
 
 
-_PERM_RANK = {"viewer": 1, "editor": 2, "owner": 3}
+def _policy_scope_for_action(action: str) -> list[str]:
+    return [action, "*"]
+
+
+def _load_document_policies(
+    db: Session,
+    tenant_id: str,
+    action: str,
+) -> list[models.ResourcePolicy]:
+    return (
+        db.query(models.ResourcePolicy)
+        .filter(
+            models.ResourcePolicy.tenant_id == tenant_id,
+            models.ResourcePolicy.is_active.is_(True),
+            models.ResourcePolicy.resource_type.in_(["document", "*"]),
+            models.ResourcePolicy.action.in_(_policy_scope_for_action(action)),
+        )
+        .order_by(models.ResourcePolicy.id.asc())
+        .all()
+    )
 
 
 def get_effective_document_permission(
@@ -257,9 +281,19 @@ def get_effective_document_permission(
     tenant_id: str,
     user: models.User,
     document_id: int,
-) -> str | None:
-    if is_admin_role(user.role):
-        return "owner"
+    action: str = "document.read",
+) -> tuple[str | None, list[int], str]:
+    document = (
+        db.query(models.Document)
+        .filter(models.Document.tenant_id == tenant_id, models.Document.id == document_id)
+        .first()
+    )
+    policies = _load_document_policies(db, tenant_id, action)
+    policy_eval = evaluate_document_policies(policies=policies, user=user, document=document)
+    if policy_eval.denied:
+        return None, policy_eval.matched_ids, policy_eval.reason
+
+    base_level: str | None = "owner" if is_admin_role(user.role) else None
     direct = (
         db.query(models.DocumentPermission)
         .filter(
@@ -270,7 +304,7 @@ def get_effective_document_permission(
         .first()
     )
     if direct:
-        return direct.permission_level
+        base_level = direct.permission_level
     any_permissions = (
         db.query(func.count(models.DocumentPermission.id))
         .filter(
@@ -280,9 +314,46 @@ def get_effective_document_permission(
         .scalar()
         or 0
     )
-    if any_permissions > 0:
-        return None
-    return None
+    if any_permissions == 0 and not is_admin_role(user.role):
+        base_level = None
+
+    final_level = base_level
+    if policy_eval.allow_level and PERM_RANK.get(policy_eval.allow_level, 0) > PERM_RANK.get(
+        final_level or "", 0
+    ):
+        final_level = policy_eval.allow_level
+    return final_level, policy_eval.matched_ids, policy_eval.reason
+
+
+def _log_policy_decision(
+    db: Session,
+    *,
+    tenant_id: str,
+    user_id: int,
+    document_id: int,
+    action: str,
+    requested_level: str,
+    base_level: str | None,
+    final_level: str | None,
+    matched_policy_ids: list[int],
+    outcome: str,
+    details: str | None = None,
+) -> None:
+    db.add(
+        models.PolicyDecisionLog(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            document_id=document_id,
+            action=action,
+            requested_level=requested_level,
+            base_level=base_level,
+            final_level=final_level,
+            outcome=outcome,
+            matched_policy_ids=matched_policy_ids,
+            details=details,
+        )
+    )
+    db.commit()
 
 
 def require_document_permission(
@@ -292,8 +363,62 @@ def require_document_permission(
     document_id: int,
     minimum: str,
 ) -> None:
-    level = get_effective_document_permission(db, tenant_id, user, document_id)
+    action = action_for_minimum(minimum)
+    level, matched_policy_ids, reason = get_effective_document_permission(
+        db, tenant_id, user, document_id, action=action
+    )
+    base_level = "owner" if is_admin_role(user.role) else None
+    direct = (
+        db.query(models.DocumentPermission)
+        .filter(
+            models.DocumentPermission.tenant_id == tenant_id,
+            models.DocumentPermission.document_id == document_id,
+            models.DocumentPermission.user_id == user.id,
+        )
+        .first()
+    )
+    if direct:
+        base_level = direct.permission_level
     if not level:
+        _log_policy_decision(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            document_id=document_id,
+            action=action,
+            requested_level=minimum,
+            base_level=base_level,
+            final_level=None,
+            matched_policy_ids=matched_policy_ids,
+            outcome="denied",
+            details=reason,
+        )
         raise HTTPException(status_code=403, detail="Document access denied")
-    if _PERM_RANK.get(level, 0) < _PERM_RANK.get(minimum, 99):
+    if PERM_RANK.get(level, 0) < PERM_RANK.get(minimum, 99):
+        _log_policy_decision(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            document_id=document_id,
+            action=action,
+            requested_level=minimum,
+            base_level=base_level,
+            final_level=level,
+            matched_policy_ids=matched_policy_ids,
+            outcome="denied",
+            details=f"insufficient_level:{level}",
+        )
         raise HTTPException(status_code=403, detail=f"{minimum} permission required")
+    _log_policy_decision(
+        db,
+        tenant_id=tenant_id,
+        user_id=user.id,
+        document_id=document_id,
+        action=action,
+        requested_level=minimum,
+        base_level=base_level,
+        final_level=level,
+        matched_policy_ids=matched_policy_ids,
+        outcome="allowed",
+        details=reason,
+    )
