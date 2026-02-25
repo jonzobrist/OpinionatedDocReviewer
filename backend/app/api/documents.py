@@ -80,16 +80,15 @@ def create(
     current_user: models.User = Depends(get_request_user),
 ) -> DocumentRead:
     doc = create_document(db, tenant_id, payload)
-    if current_user.role != "admin":
-        db.add(
-            models.DocumentPermission(
-                tenant_id=tenant_id,
-                document_id=doc.id,
-                user_id=current_user.id,
-                permission_level="owner",
-            )
+    db.add(
+        models.DocumentPermission(
+            tenant_id=tenant_id,
+            document_id=doc.id,
+            user_id=current_user.id,
+            permission_level="owner",
         )
-        db.commit()
+    )
+    db.commit()
     return doc
 
 
@@ -245,16 +244,15 @@ def import_bundle(
         raise HTTPException(status_code=422, detail="Bundle must contain at least one comment")
 
     doc = create_document(db, tenant_id, DocumentCreate(title=payload.document.title))
-    if current_user.role != "admin":
-        db.add(
-            models.DocumentPermission(
-                tenant_id=tenant_id,
-                document_id=doc.id,
-                user_id=current_user.id,
-                permission_level="owner",
-            )
+    db.add(
+        models.DocumentPermission(
+            tenant_id=tenant_id,
+            document_id=doc.id,
+            user_id=current_user.id,
+            permission_level="owner",
         )
-        db.commit()
+    )
+    db.commit()
 
     version = create_version(
         db,

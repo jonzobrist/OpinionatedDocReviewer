@@ -153,6 +153,7 @@ Backend supports two auth modes:
 
 - `AUTH_MODE=oidc` (recommended for production)
 - `AUTH_MODE=header` (simple deployment mode without external IdP)
+- `AUTH_MODE=local` (email/password + verification + MFA/reset endpoints)
 
 OIDC settings (`backend/.env` or `backend/config.toml`):
 
@@ -185,6 +186,25 @@ AUTH_MODE=header
 
 In `header` mode, the client uses `X-Tenant-Id`/`X-User-Email` headers and does
 not require a bearer token.
+
+Local auth mode (phase-1 foundation):
+
+```env
+AUTH_MODE=local
+LOCAL_AUTH_JWT_SECRET=<32+ char secret>
+AUTH_DEV_ECHO_CODES=false
+```
+
+Endpoints:
+
+- `POST /api/auth/register`
+- `POST /api/auth/verify-email`
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `POST /api/auth/forgot-password`
+- `POST /api/auth/mfa/challenge`
+- `POST /api/auth/mfa/verify`
+- `POST /api/auth/reset-password`
 
 For local development convenience, `OIDC_ALLOW_LOCAL_HEADER_FALLBACK=true` allows localhost requests without a bearer token to continue using legacy header identity. Set this to `false` in stricter environments.
 

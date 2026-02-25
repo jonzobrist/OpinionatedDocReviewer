@@ -294,6 +294,9 @@ def _ensure_schema() -> None:
         _ensure_column(connection, "personas", "is_system_locked", "BOOLEAN DEFAULT 0")
         _ensure_column(connection, "personas", "sort_order", "INTEGER DEFAULT 100")
         _ensure_column(connection, "personas", "color_theme", "TEXT")
+        _ensure_column(connection, "users", "account_state", "TEXT DEFAULT 'active'")
+        _ensure_column(connection, "users", "email_verified_at", "DATETIME")
+        _ensure_column(connection, "users", "last_login_at", "DATETIME")
         _ensure_column(connection, "meta_comments", "impact", "TEXT DEFAULT 'medium'")
         _ensure_column(connection, "meta_comments", "effort", "TEXT DEFAULT 'medium'")
         _ensure_column(connection, "meta_comments", "confidence", "REAL DEFAULT 0.5")
@@ -333,6 +336,9 @@ def _ensure_schema() -> None:
         )
         connection.execute(
             text("UPDATE personas SET sort_order=100 WHERE sort_order IS NULL")
+        )
+        connection.execute(
+            text("UPDATE users SET account_state='active' WHERE account_state IS NULL OR account_state=''")
         )
         connection.execute(
             text("UPDATE meta_comments SET impact='medium' WHERE impact IS NULL OR impact=''")

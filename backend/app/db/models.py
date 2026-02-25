@@ -228,12 +228,18 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), index=True)
     role: Mapped[str] = mapped_column(String(32), default="default")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    account_state: Mapped[str] = mapped_column(String(32), default="active")
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
 
     permissions: Mapped[List["DocumentPermission"]] = relationship(
         "DocumentPermission", back_populates="user", cascade="all, delete-orphan"
+    )
+    auth_accounts: Mapped[List["AuthAccount"]] = relationship(
+        "AuthAccount", back_populates="user", cascade="all, delete-orphan"
     )
 
 
@@ -270,6 +276,78 @@ class AdminActionLog(Base):
     target_type: Mapped[str] = mapped_column(String(80))
     target_id: Mapped[int | None] = mapped_column(Integer, default=None)
     details: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class AuthAccount(Base):
+    __tablename__ = "auth_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    password_hash: Mapped[str] = mapped_column(String(500))
+    is_email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    user: Mapped[User] = relationship("User", back_populates="auth_accounts")
+
+
+class AuthEmailVerification(Base):
+    __tablename__ = "auth_email_verifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(128), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class AuthPasswordReset(Base):
+    __tablename__ = "auth_password_resets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(128), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    created_by_user_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class AuthMfaChallenge(Base):
+    __tablename__ = "auth_mfa_challenges"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    purpose: Mapped[str] = mapped_column(String(64), index=True)
+    code_hash: Mapped[str] = mapped_column(String(128), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )

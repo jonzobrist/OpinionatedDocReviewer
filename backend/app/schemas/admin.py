@@ -8,14 +8,19 @@ from pydantic import BaseModel, ConfigDict, Field
 class AdminUserCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     email: str = Field(min_length=3, max_length=320)
-    role: str = Field(pattern="^(admin|default)$")
+    role: str = Field(
+        pattern="^(reader|reviewer|author|project_admin|system_admin|auditor|service_account|admin|default)$"
+    )
     is_active: bool = True
 
 
 class AdminUserUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     email: str | None = Field(default=None, min_length=3, max_length=320)
-    role: str | None = Field(default=None, pattern="^(admin|default)$")
+    role: str | None = Field(
+        default=None,
+        pattern="^(reader|reviewer|author|project_admin|system_admin|auditor|service_account|admin|default)$",
+    )
     is_active: bool | None = None
 
 

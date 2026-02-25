@@ -21,6 +21,7 @@ from app.schemas.admin import (
     DocumentPermissionUpdate,
 )
 from app.core.config import settings
+from app.security.roles import ADMIN_ROLES
 
 router = APIRouter(
     prefix="/admin",
@@ -108,7 +109,7 @@ def get_overview(
     )
     users_admin = (
         db.query(func.count(models.User.id))
-        .filter(models.User.tenant_id == tenant_id, models.User.role == "admin")
+        .filter(models.User.tenant_id == tenant_id, models.User.role.in_(list(ADMIN_ROLES)))
         .scalar()
         or 0
     )

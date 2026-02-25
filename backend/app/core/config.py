@@ -119,6 +119,14 @@ class Settings(BaseSettings):
     OIDC_ROLES_CLAIM: str = "roles"
     OIDC_ADMIN_ROLE: str = "admin"
     OIDC_ALLOW_LOCAL_HEADER_FALLBACK: bool = True
+    LOCAL_AUTH_JWT_SECRET: str = "change-me-local-auth-secret"
+    LOCAL_AUTH_JWT_ALGORITHM: str = "HS256"
+    LOCAL_AUTH_ACCESS_TOKEN_TTL_MINUTES: int = 720
+    AUTH_EMAIL_TOKEN_TTL_MINUTES: int = 30
+    AUTH_PASSWORD_RESET_TTL_MINUTES: int = 30
+    AUTH_MFA_CODE_TTL_MINUTES: int = 10
+    AUTH_MFA_MAX_ATTEMPTS: int = 5
+    AUTH_DEV_ECHO_CODES: bool = False
     ALLOWED_HOSTS: str = "*"
     TRUST_PROXY_HEADERS: bool = False
     PROXY_TRUSTED_IPS: str = "127.0.0.1"

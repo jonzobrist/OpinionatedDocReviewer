@@ -7,10 +7,12 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth.oidc import decode_access_token
+from app.auth.local_auth import decode_access_token as decode_local_access_token
 from app.core.config import settings
 from app.db import models
 from app.db.init_db import seed_default_admin_user
 from app.db.session import SessionLocal
+from app.security.roles import is_admin_role
 from app.security.tenant import validate_tenant_id
 
 
@@ -78,11 +80,13 @@ def _get_or_create_user(
         .filter(models.User.tenant_id == tenant_id, models.User.email == email)
         .first()
     )
-    role = "admin" if is_admin else "default"
+    role = "system_admin" if is_admin else "reader"
     if user:
         user.name = name or user.name or email
         user.role = role
         user.is_active = True
+        if user.account_state in {"disabled", "locked"}:
+            user.account_state = "active"
         db.commit()
         db.refresh(user)
         return user
@@ -92,6 +96,8 @@ def _get_or_create_user(
         email=email,
         role=role,
         is_active=True,
+        account_state="active",
+        email_verified_at=None,
     )
     db.add(user)
     db.commit()
@@ -119,7 +125,7 @@ def _auth_context_from_headers(
     elif x_user_email:
         query = query.filter(models.User.email == x_user_email)
     else:
-        query = query.filter(models.User.role == "admin")
+        query = query.filter(models.User.role.in_(["admin", "project_admin", "system_admin"]))
     user = query.first()
     if not user or not user.is_active:
         raise HTTPException(status_code=403, detail="User access denied")
@@ -150,6 +156,31 @@ def _auth_context_from_oidc(
         name=name,
         is_admin=_is_admin_from_claims(claims),
     )
+    return AuthContext(tenant_id=tenant_id, user=user, claims=claims)
+
+
+def _auth_context_from_local_token(
+    db: Session,
+    authorization: str | None,
+) -> AuthContext:
+    token = _extract_bearer_token(authorization)
+    claims = decode_local_access_token(token)
+    tenant_claim = claims.get("tenant_id")
+    if not isinstance(tenant_claim, str) or not tenant_claim.strip():
+        raise HTTPException(status_code=401, detail="Token missing tenant_id")
+    tenant_id = validate_tenant_id(tenant_claim)
+    user_id_raw = claims.get("sub")
+    try:
+        user_id = int(str(user_id_raw))
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Token missing valid subject") from exc
+    user = (
+        db.query(models.User)
+        .filter(models.User.tenant_id == tenant_id, models.User.id == user_id)
+        .first()
+    )
+    if not user or not user.is_active or user.account_state in {"disabled", "locked"}:
+        raise HTTPException(status_code=403, detail="User access denied")
     return AuthContext(tenant_id=tenant_id, user=user, claims=claims)
 
 
@@ -191,6 +222,8 @@ def get_auth_context(
             x_user_email=x_user_email,
             x_user_id=x_user_id,
         )
+    elif mode == "local":
+        context = _auth_context_from_local_token(db=db, authorization=authorization)
     else:
         raise HTTPException(status_code=500, detail=f"Unsupported AUTH_MODE: {settings.AUTH_MODE}")
     request.state.auth_context = context
@@ -211,7 +244,7 @@ def require_admin_user(context: AuthContext = Depends(get_auth_context)) -> mode
     user = context.user
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Admin access denied")
-    if user.role != "admin":
+    if not is_admin_role(user.role):
         raise HTTPException(status_code=403, detail="Admin role required")
     return user
 
@@ -225,7 +258,7 @@ def get_effective_document_permission(
     user: models.User,
     document_id: int,
 ) -> str | None:
-    if user.role == "admin":
+    if is_admin_role(user.role):
         return "owner"
     direct = (
         db.query(models.DocumentPermission)
@@ -249,8 +282,7 @@ def get_effective_document_permission(
     )
     if any_permissions > 0:
         return None
-    # Backward-compatible behavior for docs that predate permission records.
-    return "owner"
+    return None
 
 
 def require_document_permission(
