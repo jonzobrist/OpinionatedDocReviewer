@@ -17,6 +17,7 @@ bun run test
 - `NEXT_PUBLIC_API_BASE` is the primary API base setting (used by browser calls and by Next.js `/api` rewrite when present).
 - Frontend port resolution for `bun run dev`/`bun run start`: `PORT` -> `FRONTEND_PORT` -> `3000`.
 - Optional: set `NEXT_SERVER_API_BASE` only if the server-side rewrite target must differ from the public API base.
+- Optional: set `ALLOWED_DEV_ORIGINS` (comma-separated hosts) to populate Next.js `allowedDevOrigins` in `next dev`.
 - If neither is set, defaults are `${window.location.origin}/api` (browser) and `http://localhost:8006/api` (server rewrite).
 - For reverse proxy setups like `https://odr.zlyxy.me`, set `NEXT_PUBLIC_API_BASE=https://odr.zlyxy.me/api`.
 - The UI also lets you override API base + tenant ID in the Connection panel.

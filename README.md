@@ -186,6 +186,7 @@ Do not commit secrets.
 - Frontend API routing can be configured in root `.env`:
   - `NEXT_PUBLIC_API_BASE` is the primary API base used by browser calls and Next rewrite.
   - Optional `NEXT_SERVER_API_BASE` can override only the server rewrite target when needed.
+  - Optional `ALLOWED_DEV_ORIGINS` (comma-separated) sets Next.js `allowedDevOrigins` for reverse-proxy dev warnings.
   - Example for reverse proxy: `NEXT_PUBLIC_API_BASE=https://odr.zlyxy.me/api`.
 
 ## Authentication (OIDC/JWT)
