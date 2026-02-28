@@ -61,24 +61,24 @@
 - [x] Add safety guards for oversized reference notes/examples.
 
 ### Phase 3: Full CRUD UI for Agents
-- [ ] Build `/agents` as full management page (not just drawer):
-- [ ] Agent list, search, sort, active toggle.
-- [ ] Create form with advanced sections:
-- [ ] Core identity: name, description, tone.
-- [ ] Prompting: system prompt, focus areas, reference notes.
-- [ ] Output contract: required format, bullet count, mandatory quote/citation options.
-- [ ] Display settings: color theme, icon/label.
-- [ ] Edit + duplicate + delete actions.
-- [ ] Guardrails for system default agents (lock/delete behavior, reset option).
+- [x] Build `/agents` as full management page (not just drawer):
+- [x] Agent list, search, sort, active toggle.
+- [x] Create form with advanced sections:
+- [x] Core identity: name, description, tone.
+- [x] Prompting: system prompt, focus areas, reference notes.
+- [x] Output contract: required format, bullet count, mandatory quote/citation options.
+- [x] Display settings: color theme, icon/label.
+- [x] Edit + duplicate + delete actions.
+- [x] Guardrails for system default agents (lock/delete behavior, reset option).
 
 ### Phase 4: Defaults + Persistence Behavior
-- [ ] Ensure default agents are always present per tenant.
-- [ ] Prevent accidental deletion of default agents unless explicitly converted to user agent.
-- [ ] Add "Restore defaults" action with preview of what will change.
+- [x] Ensure default agents are always present per tenant.
+- [x] Prevent accidental deletion of default agents unless explicitly converted to user agent.
+- [x] Add "Restore defaults" action with preview of what will change.
 
 ### Phase 5: Testing + QA
-- [ ] Backend tests for new persona schema and migrations.
-- [ ] Backend tests for prompt assembly with new fields.
-- [ ] Frontend tests for full CRUD flows on `/agents`.
+- [x] Backend tests for new persona schema and migrations.
+- [x] Backend tests for prompt assembly with new fields.
+- [x] Frontend tests for full CRUD flows on `/agents`.
 - [ ] Regression tests ensuring default agents persist across restarts.
 - [ ] E2E smoke test: create custom agent -> run review -> comments reflect new output requirements.

@@ -32,7 +32,7 @@ You can configure provider values in either:
 
 - `backend/.env`
 - `backend/config.toml`
-- UI `System` panel (`http://localhost:3000`) for runtime config updates
+- UI `System` panel (`http://localhost:${FRONTEND_PORT:-3000}`) for runtime config updates
 
 ### OpenAI
 

@@ -129,6 +129,11 @@ main {
   box-shadow: var(--shadow-tight);
 }
 
+.ghost-button.compact {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
 .ghost-button.danger-button {
   border-color: rgba(192, 58, 43, 0.35);
   color: var(--danger-500);
@@ -1250,6 +1255,16 @@ main {
   gap: 8px;
 }
 
+.agents-list-toolbar {
+  display: grid;
+  gap: 8px;
+}
+
+.agents-list-meta {
+  font-size: 12px;
+  color: var(--ink-500);
+}
+
 .agents-list-item {
   width: 100%;
   border-radius: 12px;
@@ -1282,6 +1297,12 @@ main {
   flex-wrap: wrap;
 }
 
+.agents-list-row.actions {
+  margin-top: 10px;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .agents-list-name {
   font-weight: 700;
   color: var(--ink-800);
@@ -1295,6 +1316,47 @@ main {
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.86);
   padding: 16px;
+}
+
+.agents-group-panel {
+  border-top: 1px solid var(--surface-3);
+  padding-top: 10px;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agents-group-create {
+  display: grid;
+  gap: 8px;
+}
+
+.agents-group-list {
+  display: grid;
+  gap: 8px;
+}
+
+.agents-group-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--surface-3);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.agents-group-name {
+  font-weight: 600;
+  color: var(--ink-700);
+}
+
+.agents-group-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .grid-two {

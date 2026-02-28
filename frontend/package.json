@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "sh -c 'next dev -p \"${PORT:-3000}\"'",
+    "dev": "sh -c 'next dev -p \"${PORT:-${FRONTEND_PORT:-3000}}\"'",
     "build": "next build",
-    "start": "sh -c 'next start -p \"${PORT:-3000}\"'",
+    "start": "sh -c 'next start -p \"${PORT:-${FRONTEND_PORT:-3000}}\"'",
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",

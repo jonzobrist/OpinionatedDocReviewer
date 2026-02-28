@@ -89,7 +89,7 @@ Useful scripts:
 
 ### 3. Open UI
 
-- Frontend: `http://localhost:3000`
+- Frontend: `http://localhost:${FRONTEND_PORT:-3000}`
 - Backend API: `http://localhost:8006/api`
 
 ## UI Routes
@@ -139,7 +139,12 @@ bun run test:smoke
 Do not commit secrets.
 
 - Root `.env` and `backend/.env` are gitignored.
-- Configure provider settings via the UI: `System` panel in `http://localhost:3000`.
+- Copy `.env.example` to `.env` for local runtime port/api defaults.
+- Runtime ports:
+  - `PORT` controls backend API port (default `8006`).
+  - `FRONTEND_PORT` controls frontend port (default `3000`).
+  - Frontend scripts honor `PORT` first, then `FRONTEND_PORT`.
+- Configure provider settings via the UI: `System` panel in `http://localhost:${FRONTEND_PORT:-3000}`.
 - Or configure via `backend/.env` / `backend/config.toml` (examples in `backend/.env.example` and `backend/config.example.toml`).
 - CORS is configurable in backend env/config; see `PRODUCT.md`.
 - Frontend API routing can be configured in root `.env`:

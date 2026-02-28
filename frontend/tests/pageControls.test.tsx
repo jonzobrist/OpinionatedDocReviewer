@@ -71,6 +71,40 @@ describe('page controls', () => {
         group_id: null,
         is_active: true,
         created_at: new Date().toISOString()
+      },
+      {
+        id: 2,
+        tenant_id: 'local-dev',
+        name: 'Security Hawk',
+        description: 'Finds security issues',
+        system_prompt: 'Review for security',
+        focus_areas: ['security'],
+        tone: 'direct',
+        reference_notes: null,
+        output_requirements: {
+          format: 'bullet_list',
+          max_bullets: 4,
+          require_quote_excerpt: true,
+          require_actionable: true,
+          include_severity: true
+        },
+        examples: [],
+        is_default: false,
+        is_system_locked: false,
+        sort_order: 20,
+        color_theme: '#b7482f',
+        group_id: 10,
+        is_active: false,
+        created_at: new Date().toISOString()
+      }
+    ];
+    const personaGroupsPayload = [
+      {
+        id: 10,
+        tenant_id: 'local-dev',
+        name: 'Security',
+        description: 'Security-focused reviewers',
+        created_at: new Date().toISOString()
       }
     ];
     const documentLibraryPayload = [
@@ -101,6 +135,36 @@ describe('page controls', () => {
       }
       if (url.endsWith('/documents/library')) return json(documentLibraryPayload);
       if (url.endsWith('/documents')) return json([]);
+      if (url.endsWith('/persona-groups') && (!init?.method || init.method === 'GET')) {
+        return json(personaGroupsPayload);
+      }
+      if (url.endsWith('/persona-groups') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body || '{}'));
+        return json(
+          {
+            id: 99,
+            tenant_id: 'local-dev',
+            name: body.name,
+            description: body.description ?? null,
+            created_at: new Date().toISOString()
+          },
+          201
+        );
+      }
+      if (url.includes('/persona-groups/') && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body || '{}'));
+        const id = Number(url.split('/').pop());
+        return json({
+          id,
+          tenant_id: 'local-dev',
+          name: body.name ?? 'Security',
+          description: body.description ?? null,
+          created_at: new Date().toISOString()
+        });
+      }
+      if (url.includes('/persona-groups/') && init?.method === 'DELETE') {
+        return new Response(null, { status: 204 });
+      }
       if (url.endsWith('/documents/101/history')) {
         return json([
           {
@@ -184,20 +248,26 @@ describe('page controls', () => {
           }
         ]);
       }
-      if (url.endsWith('/personas') && (!init || init.method === 'GET')) return json(personasPayload);
+      if (url.endsWith('/personas') && (!init?.method || init.method === 'GET')) {
+        return json(personasPayload);
+      }
       if (url.endsWith('/personas') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body || '{}'));
         return json({
           ...personasPayload[0],
-          id: 2,
+          id: 3,
           name: body.name,
-          system_prompt: body.system_prompt
+          system_prompt: body.system_prompt,
+          group_id: body.group_id ?? null,
+          is_active: body.is_active ?? true
         }, 201);
       }
       if (url.endsWith('/reset-defaults') && init?.method === 'POST') return json(personasPayload);
       if (url.includes('/personas/') && init?.method === 'PATCH') {
         const body = JSON.parse(String(init.body || '{}'));
-        return json({ ...personasPayload[0], ...body });
+        const id = Number(url.split('/').pop());
+        const base = personasPayload.find((persona) => persona.id === id) ?? personasPayload[0];
+        return json({ ...base, ...body, id });
       }
       if (url.includes('/personas/') && init?.method === 'DELETE') {
         return new Response(null, { status: 204 });
@@ -211,7 +281,7 @@ describe('page controls', () => {
           doc_repo_enabled: true
         });
       }
-      if (url.endsWith('/settings') && (!init || init.method === 'GET')) {
+      if (url.endsWith('/settings') && (!init?.method || init.method === 'GET')) {
         return json({
           llm_provider: 'openai',
           openai_model: 'gpt-4o-mini',
@@ -527,6 +597,22 @@ describe('page controls', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Save Agent' })).toBeTruthy();
     });
+  });
+
+  it('filters and duplicates agents', async () => {
+    mockPathname = '/agents';
+    render(<HomePage />);
+
+    expect(await screen.findByText('Security Hawk')).toBeTruthy();
+    const statusSelect = await screen.findByDisplayValue('status: all');
+    fireEvent.change(statusSelect, { target: { value: 'disabled' } });
+
+    expect(screen.queryByText('Clarity Editor')).toBeNull();
+
+    const duplicateButton = await screen.findByRole('button', { name: 'Duplicate' });
+    fireEvent.click(duplicateButton);
+
+    expect(await screen.findByText('Security Hawk Copy')).toBeTruthy();
   });
 
   it('opens admin overlay from route', async () => {

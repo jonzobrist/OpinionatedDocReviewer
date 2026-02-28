@@ -3,6 +3,8 @@
 ## Run (local)
 ```bash
 bun install
+# Optional port override:
+# FRONTEND_PORT=3100 bun run dev
 bun run dev
 ```
 
@@ -13,6 +15,7 @@ bun run test
 
 ## Notes
 - `NEXT_PUBLIC_API_BASE` is the primary API base setting (used by browser calls and by Next.js `/api` rewrite when present).
+- Frontend port resolution for `bun run dev`/`bun run start`: `PORT` -> `FRONTEND_PORT` -> `3000`.
 - Optional: set `NEXT_SERVER_API_BASE` only if the server-side rewrite target must differ from the public API base.
 - If neither is set, defaults are `${window.location.origin}/api` (browser) and `http://localhost:8006/api` (server rewrite).
 - For reverse proxy setups like `https://odr.zlyxy.me`, set `NEXT_PUBLIC_API_BASE=https://odr.zlyxy.me/api`.

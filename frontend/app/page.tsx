@@ -42,6 +42,7 @@ import {
   DocumentLibraryEntry,
   DocumentRead,
   DocumentVersionRead,
+  PersonaGroupRead,
   PersonaRead,
   ReviewJobRead,
   MetaReviewRunRead,
@@ -143,6 +144,7 @@ function HomePageContent() {
   const [comments, setComments] = useState<CommentRead[]>([]);
   const [reviewJobs, setReviewJobs] = useState<ReviewJobRead[]>([]);
   const [personas, setPersonas] = useState<PersonaRead[]>([]);
+  const [personaGroups, setPersonaGroups] = useState<PersonaGroupRead[]>([]);
   const [history, setHistory] = useState<DocumentCommitRead[]>([]);
   const [historyJobs, setHistoryJobs] = useState<ReviewJobRead[]>([]);
   const [historyDocumentId, setHistoryDocumentId] = useState<number | null>(null);
@@ -211,6 +213,14 @@ function HomePageContent() {
   const [agentDraft, setAgentDraft] = useState<AgentDraft>(() => createEmptyAgentDraft());
   const [isAgentSaving, setIsAgentSaving] = useState(false);
   const [agentBusyId, setAgentBusyId] = useState<number | null>(null);
+  const [agentSearch, setAgentSearch] = useState('');
+  const [agentStatusFilter, setAgentStatusFilter] = useState<'all' | 'active' | 'disabled'>('all');
+  const [agentSort, setAgentSort] = useState<'order' | 'name' | 'created'>('order');
+  const [agentGroupFilter, setAgentGroupFilter] = useState<'all' | 'ungrouped' | string>('all');
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupDescription, setNewGroupDescription] = useState('');
+  const [groupBusyId, setGroupBusyId] = useState<number | null>(null);
+  const [isGroupSaving, setIsGroupSaving] = useState(false);
   const [agentImportConflictPolicy, setAgentImportConflictPolicy] = useState<
     'skip' | 'overwrite' | 'rename'
   >('rename');
@@ -441,12 +451,20 @@ function HomePageContent() {
         apiFetch<PersonaRead[]>('/personas'),
         apiFetch<DocumentLibraryEntry[]>('/documents/library')
       ]);
+      let groupList: PersonaGroupRead[] = [];
+      try {
+        const groups = await apiFetch<PersonaGroupRead[]>('/persona-groups');
+        groupList = Array.isArray(groups) ? groups : [];
+      } catch {
+        groupList = [];
+      }
       const safeDocs = Array.isArray(docList) ? docList : [];
       const safePersonas = Array.isArray(personaList) ? personaList : [];
       const safeLibrary = Array.isArray(libraryList) ? libraryList : [];
       setDocuments(safeDocs);
       setPersonas(safePersonas);
       setLibraryEntries(safeLibrary);
+      setPersonaGroups(groupList);
       if (enabledPersonas.size === 0 && safePersonas.length > 0) {
         setEnabledPersonas(new Set(safePersonas.filter((p) => p.is_active).map((p) => p.id)));
       }
@@ -1335,11 +1353,97 @@ function HomePageContent() {
       setIsCreatingAgent(false);
       setEditingPersonaId(saved.id);
       setAgentDraft(createDraftFromPersona(saved));
+      if (!editingPersonaId && saved.is_active) {
+        setEnabledPersonas((prev) => {
+          const next = new Set(prev);
+          next.add(saved.id);
+          return next;
+        });
+      }
+      if (editingPersonaId && !saved.is_active) {
+        setEnabledPersonas((prev) => {
+          const next = new Set(prev);
+          next.delete(saved.id);
+          return next;
+        });
+      }
       setStatusMessage(editingPersonaId ? 'Agent updated.' : 'Agent created.');
     } catch (error) {
       setErrorMessage(normalizeError(error));
     } finally {
       setIsAgentSaving(false);
+    }
+  }
+
+  function buildDuplicateAgentName(sourceName: string, existingNames: Set<string>): string {
+    const base = `${sourceName} Copy`;
+    if (!existingNames.has(base.toLowerCase())) return base;
+    let idx = 2;
+    while (existingNames.has(`${base} ${idx}`.toLowerCase())) {
+      idx += 1;
+    }
+    return `${base} ${idx}`;
+  }
+
+  async function handleDuplicateAgent(persona: PersonaRead) {
+    setErrorMessage(null);
+    setAgentBusyId(persona.id);
+    try {
+      const existingNames = new Set(personas.map((item) => item.name.toLowerCase()));
+      const draft = createDraftFromPersona(persona);
+      draft.name = buildDuplicateAgentName(persona.name, existingNames);
+      const payload = buildPersonaPayload(draft);
+      const created = await apiFetch<PersonaRead>('/personas', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      setPersonas((prev) =>
+        [...prev, created].slice().sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+      );
+      if (created.color_theme) {
+        updateAgentTheme(created.id, created.color_theme, created.name);
+      }
+      setIsCreatingAgent(false);
+      setEditingPersonaId(created.id);
+      setAgentDraft(createDraftFromPersona(created));
+      if (created.is_active) {
+        setEnabledPersonas((prev) => {
+          const next = new Set(prev);
+          next.add(created.id);
+          return next;
+        });
+      }
+      setStatusMessage(`Duplicated "${persona.name}".`);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setAgentBusyId(null);
+    }
+  }
+
+  async function handleToggleAgentActive(persona: PersonaRead) {
+    setErrorMessage(null);
+    setAgentBusyId(persona.id);
+    try {
+      const updated = await apiFetch<PersonaRead>(`/personas/${persona.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_active: !persona.is_active })
+      });
+      setPersonas((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      setEnabledPersonas((prev) => {
+        const next = new Set(prev);
+        if (updated.is_active) {
+          next.add(updated.id);
+        } else {
+          next.delete(updated.id);
+        }
+        return next;
+      });
+      setStatusMessage(`Agent ${updated.is_active ? 'enabled' : 'disabled'}.`);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setAgentBusyId(null);
     }
   }
 
@@ -1357,6 +1461,11 @@ function HomePageContent() {
       await apiFetch<null>(`/personas/${persona.id}`, { method: 'DELETE' });
       const next = personas.filter((item) => item.id !== persona.id);
       setPersonas(next);
+      setEnabledPersonas((prev) => {
+        const updated = new Set(prev);
+        updated.delete(persona.id);
+        return updated;
+      });
       if (editingPersonaId === persona.id) {
         if (next.length > 0) {
           setPersonaForEditing(next[0]);
@@ -1384,6 +1493,18 @@ function HomePageContent() {
     try {
       const next = await apiFetch<PersonaRead[]>('/personas/reset-defaults', { method: 'POST' });
       setPersonas(next);
+      setEnabledPersonas((prev) => {
+        if (prev.size === 0) {
+          return new Set(next.filter((persona) => persona.is_active).map((persona) => persona.id));
+        }
+        const updated = new Set(prev);
+        for (const persona of next) {
+          if (!persona.is_active) {
+            updated.delete(persona.id);
+          }
+        }
+        return updated;
+      });
       if (next.length > 0) {
         const stillSelected =
           editingPersonaId !== null ? next.find((persona) => persona.id === editingPersonaId) : null;
@@ -1423,11 +1544,95 @@ function HomePageContent() {
       if (reverted.color_theme) {
         updateAgentTheme(reverted.id, reverted.color_theme, reverted.name);
       }
+      if (!reverted.is_active) {
+        setEnabledPersonas((prev) => {
+          const next = new Set(prev);
+          next.delete(reverted.id);
+          return next;
+        });
+      }
       setStatusMessage(`Reverted "${reverted.name}" to default.`);
     } catch (error) {
       setErrorMessage(normalizeError(error));
     } finally {
       setAgentBusyId(null);
+    }
+  }
+
+  async function handleCreatePersonaGroup() {
+    setErrorMessage(null);
+    const trimmed = newGroupName.trim();
+    if (!trimmed) {
+      setErrorMessage('Group name is required.');
+      return;
+    }
+    setIsGroupSaving(true);
+    try {
+      const created = await apiFetch<PersonaGroupRead>('/persona-groups', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: trimmed,
+          description: newGroupDescription.trim() || null
+        })
+      });
+      setPersonaGroups((prev) =>
+        [...prev, created].slice().sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setNewGroupName('');
+      setNewGroupDescription('');
+      setStatusMessage(`Group "${created.name}" created.`);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setIsGroupSaving(false);
+    }
+  }
+
+  async function handleRenamePersonaGroup(group: PersonaGroupRead) {
+    const nextName = window.prompt('Rename group', group.name);
+    if (!nextName) return;
+    setErrorMessage(null);
+    setGroupBusyId(group.id);
+    try {
+      const updated = await apiFetch<PersonaGroupRead>(`/persona-groups/${group.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: nextName.trim() })
+      });
+      setPersonaGroups((prev) =>
+        prev
+          .map((item) => (item.id === updated.id ? updated : item))
+          .slice()
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setStatusMessage(`Group "${updated.name}" updated.`);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setGroupBusyId(null);
+    }
+  }
+
+  async function handleDeletePersonaGroup(group: PersonaGroupRead) {
+    const groupCount = personaGroupCounts.get(group.id) ?? 0;
+    if (groupCount > 0) {
+      setErrorMessage('Remove agents from this group before deleting.');
+      return;
+    }
+    const confirmed = window.confirm(`Delete group "${group.name}"?`);
+    if (!confirmed) return;
+    setErrorMessage(null);
+    setGroupBusyId(group.id);
+    try {
+      await apiFetch<null>(`/persona-groups/${group.id}`, { method: 'DELETE' });
+      setPersonaGroups((prev) => prev.filter((item) => item.id !== group.id));
+      if (agentGroupFilter === String(group.id)) {
+        setAgentGroupFilter('all');
+      }
+      setStatusMessage(`Group "${group.name}" deleted.`);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setGroupBusyId(null);
     }
   }
 
@@ -1488,6 +1693,62 @@ function HomePageContent() {
     }
     return map;
   }, [personas]);
+
+  const personaGroupsById = useMemo(() => {
+    const map = new Map<number, PersonaGroupRead>();
+    for (const group of personaGroups) {
+      map.set(group.id, group);
+    }
+    return map;
+  }, [personaGroups]);
+
+  const personaGroupCounts = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const persona of personas) {
+      if (!persona.group_id) continue;
+      counts.set(persona.group_id, (counts.get(persona.group_id) ?? 0) + 1);
+    }
+    return counts;
+  }, [personas]);
+
+  const sortedPersonaGroups = useMemo(
+    () => personaGroups.slice().sort((a, b) => a.name.localeCompare(b.name)),
+    [personaGroups]
+  );
+
+  const filteredPersonas = useMemo(() => {
+    let next = personas.slice();
+    if (agentStatusFilter === 'active') {
+      next = next.filter((persona) => persona.is_active);
+    } else if (agentStatusFilter === 'disabled') {
+      next = next.filter((persona) => !persona.is_active);
+    }
+    if (agentGroupFilter !== 'all') {
+      if (agentGroupFilter === 'ungrouped') {
+        next = next.filter((persona) => !persona.group_id);
+      } else {
+        const groupId = Number(agentGroupFilter);
+        next = next.filter((persona) => persona.group_id === groupId);
+      }
+    }
+    const query = agentSearch.trim().toLowerCase();
+    if (query) {
+      next = next.filter((persona) => {
+        if (persona.name.toLowerCase().includes(query)) return true;
+        if (persona.description && persona.description.toLowerCase().includes(query)) return true;
+        if (persona.tone && persona.tone.toLowerCase().includes(query)) return true;
+        return persona.focus_areas.some((area) => area.toLowerCase().includes(query));
+      });
+    }
+    if (agentSort === 'name') {
+      next.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (agentSort === 'created') {
+      next.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    } else {
+      next.sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+    }
+    return next;
+  }, [personas, agentSearch, agentStatusFilter, agentSort, agentGroupFilter]);
 
   const filteredLibrary = useMemo(() => {
     if (libraryFilter === 'archived') {
@@ -3684,37 +3945,176 @@ function HomePageContent() {
 
             <div className="agents-workspace">
               <aside className="agents-list">
-                {personas.length === 0 && <div className="subtle">No agents configured.</div>}
-                {personas
-                  .slice()
-                  .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
-                  .map((persona) => {
-                    const color = getThemeForPersona(agentThemes, persona.id, colorForPersona(persona.id));
-                    const selected = persona.id === editingPersonaId;
-                    return (
-                      <button
-                        key={persona.id}
-                        type="button"
-                        className={`agents-list-item ${selected ? 'active' : ''}`}
-                        onClick={() => {
+                <div className="agents-list-toolbar">
+                  <input
+                    className="input compact"
+                    placeholder="Search agents"
+                    value={agentSearch}
+                    onChange={(event) => setAgentSearch(event.target.value)}
+                  />
+                  <select
+                    className="input compact"
+                    value={agentStatusFilter}
+                    onChange={(event) =>
+                      setAgentStatusFilter(event.target.value as 'all' | 'active' | 'disabled')
+                    }
+                  >
+                    <option value="all">status: all</option>
+                    <option value="active">status: active</option>
+                    <option value="disabled">status: disabled</option>
+                  </select>
+                  <select
+                    className="input compact"
+                    value={agentGroupFilter}
+                    onChange={(event) => setAgentGroupFilter(event.target.value)}
+                  >
+                    <option value="all">group: all</option>
+                    <option value="ungrouped">group: ungrouped</option>
+                    {sortedPersonaGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        group: {group.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="input compact"
+                    value={agentSort}
+                    onChange={(event) =>
+                      setAgentSort(event.target.value as 'order' | 'name' | 'created')
+                    }
+                  >
+                    <option value="order">sort: order</option>
+                    <option value="name">sort: name</option>
+                    <option value="created">sort: newest</option>
+                  </select>
+                </div>
+                <div className="agents-list-meta">
+                  Showing {filteredPersonas.length} of {personas.length}
+                </div>
+                {filteredPersonas.length === 0 && (
+                  <div className="subtle">No agents match the current filters.</div>
+                )}
+                {filteredPersonas.map((persona) => {
+                  const color = getThemeForPersona(agentThemes, persona.id, colorForPersona(persona.id));
+                  const selected = persona.id === editingPersonaId;
+                  const groupName = persona.group_id
+                    ? personaGroupsById.get(persona.group_id)?.name
+                    : null;
+                  return (
+                    <div
+                      key={persona.id}
+                      role="button"
+                      tabIndex={0}
+                      className={`agents-list-item ${selected ? 'active' : ''}`}
+                      onClick={() => {
+                        setPersonaForEditing(persona);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
                           setPersonaForEditing(persona);
-                        }}
-                      >
-                        <div className="agents-list-row">
-                          <span className="agent-dot" style={{ backgroundColor: color }} />
-                          <span className="agents-list-name">{persona.name}</span>
-                          <span className={`status-pill ${persona.is_active ? 'ok' : 'neutral'}`}>
-                            {persona.is_active ? 'Active' : 'Disabled'}
-                          </span>
+                        }
+                      }}
+                    >
+                      <div className="agents-list-row">
+                        <span className="agent-dot" style={{ backgroundColor: color }} />
+                        <span className="agents-list-name">{persona.name}</span>
+                        <span className={`status-pill ${persona.is_active ? 'ok' : 'neutral'}`}>
+                          {persona.is_active ? 'Active' : 'Disabled'}
+                        </span>
+                      </div>
+                      <div className="agents-list-row tags">
+                        {persona.is_default && <span className="meta-pill">Default</span>}
+                        {persona.is_system_locked && <span className="meta-pill">Locked</span>}
+                        {groupName && <span className="meta-pill">Group {groupName}</span>}
+                        <span className="meta-pill">Order {persona.sort_order}</span>
+                      </div>
+                      <div className="agents-list-row actions">
+                        <button
+                          className="ghost-button compact"
+                          type="button"
+                          disabled={agentBusyId === persona.id}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleToggleAgentActive(persona);
+                          }}
+                        >
+                          {persona.is_active ? 'Disable' : 'Enable'}
+                        </button>
+                        <button
+                          className="ghost-button compact"
+                          type="button"
+                          disabled={agentBusyId === persona.id}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleDuplicateAgent(persona);
+                          }}
+                        >
+                          Duplicate
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="agents-group-panel">
+                  <div className="drawer-title">Groups</div>
+                  <div className="agents-group-create">
+                    <input
+                      className="input compact"
+                      placeholder="Group name"
+                      value={newGroupName}
+                      onChange={(event) => setNewGroupName(event.target.value)}
+                    />
+                    <input
+                      className="input compact"
+                      placeholder="Description (optional)"
+                      value={newGroupDescription}
+                      onChange={(event) => setNewGroupDescription(event.target.value)}
+                    />
+                    <button
+                      className="ghost-button compact"
+                      type="button"
+                      disabled={isGroupSaving}
+                      onClick={() => void handleCreatePersonaGroup()}
+                    >
+                      {isGroupSaving ? 'Creating...' : 'Create'}
+                    </button>
+                  </div>
+                  <div className="agents-group-list">
+                    {sortedPersonaGroups.length === 0 && (
+                      <div className="subtle">No persona groups yet.</div>
+                    )}
+                    {sortedPersonaGroups.map((group) => {
+                      const count = personaGroupCounts.get(group.id) ?? 0;
+                      return (
+                        <div key={group.id} className="agents-group-row">
+                          <div>
+                            <div className="agents-group-name">{group.name}</div>
+                            <div className="subtle">{count} agents</div>
+                          </div>
+                          <div className="agents-group-actions">
+                            <button
+                              className="ghost-button compact"
+                              type="button"
+                              disabled={groupBusyId === group.id}
+                              onClick={() => void handleRenamePersonaGroup(group)}
+                            >
+                              Rename
+                            </button>
+                            <button
+                              className="ghost-button compact danger-button"
+                              type="button"
+                              disabled={groupBusyId === group.id || count > 0}
+                              onClick={() => void handleDeletePersonaGroup(group)}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </div>
-                        <div className="agents-list-row tags">
-                          {persona.is_default && <span className="meta-pill">Default</span>}
-                          {persona.is_system_locked && <span className="meta-pill">Locked</span>}
-                          <span className="meta-pill">Order {persona.sort_order}</span>
-                        </div>
-                      </button>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+                </div>
               </aside>
 
               <section className="agents-editor">
@@ -3787,6 +4187,25 @@ function HomePageContent() {
                   value={agentDraft.tone}
                   onChange={(event) => setAgentDraft((prev) => ({ ...prev, tone: event.target.value }))}
                 />
+                <div className="spacer" />
+                <label className="subtle">Group</label>
+                <select
+                  className="input"
+                  value={agentDraft.group_id ?? ''}
+                  onChange={(event) =>
+                    setAgentDraft((prev) => ({
+                      ...prev,
+                      group_id: event.target.value ? Number(event.target.value) : null
+                    }))
+                  }
+                >
+                  <option value="">Ungrouped</option>
+                  {sortedPersonaGroups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+                </select>
                 <div className="grid-three">
                   <div>
                     <label className="subtle">Output Format</label>
