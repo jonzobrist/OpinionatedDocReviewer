@@ -73,7 +73,43 @@ Make sure Redis is running (for queued reviews):
 brew services start redis
 ```
 
-### 2. Start the app
+Install toolchain once (macOS/Homebrew):
+
+```bash
+brew install redis bun node@22 uv
+```
+
+### 2. Create local env
+
+```bash
+cp .env.example .env
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+```
+
+LLM provider examples (`backend/.env`):
+
+OpenAI:
+
+```env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=replace-me
+OPENAI_MODEL=gpt-4o-mini
+```
+
+Bedrock:
+
+```env
+LLM_PROVIDER=bedrock
+BEDROCK_REGION=us-east-1
+BEDROCK_MODEL_ID=anthropic.claude-3-5-haiku-20241022-v1:0
+BEDROCK_AWS_ACCESS_KEY_ID=replace-me
+BEDROCK_AWS_SECRET_ACCESS_KEY=replace-me
+# Optional:
+BEDROCK_AWS_SESSION_TOKEN=
+```
+
+### 3. Start the app
 
 From repo root:
 
@@ -87,7 +123,7 @@ Useful scripts:
 - `./scripts/admin/restart.sh`
 - `./scripts/admin/stop.sh`
 
-### 3. Open UI
+### 4. Open UI
 
 - Frontend: `http://localhost:${FRONTEND_PORT:-3000}`
 - Backend API: `http://localhost:8006/api`
