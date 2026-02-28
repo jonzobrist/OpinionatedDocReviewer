@@ -99,3 +99,32 @@ def test_revert_default_rejects_custom_persona(client) -> None:
 
     rejected = client.post(f"/api/personas/{persona_id}/reset-default", headers=headers)
     assert rejected.status_code == 400
+
+
+def test_default_personas_persist_without_duplicates_on_relist(client) -> None:
+    headers = {"X-Tenant-Id": "tenant-default-persist"}
+
+    seeded = client.post("/api/personas/reset-defaults", headers=headers)
+    assert seeded.status_code == 200
+
+    first = client.get("/api/personas", headers=headers)
+    assert first.status_code == 200
+    first_payload = first.json()
+    first_default_ids = {
+        persona["id"]
+        for persona in first_payload
+        if persona.get("is_default") and persona.get("is_system_locked")
+    }
+    assert len(first_default_ids) >= 1
+
+    second = client.get("/api/personas", headers=headers)
+    assert second.status_code == 200
+    second_payload = second.json()
+    second_default_ids = {
+        persona["id"]
+        for persona in second_payload
+        if persona.get("is_default") and persona.get("is_system_locked")
+    }
+
+    assert len(second_payload) == len(first_payload)
+    assert second_default_ids == first_default_ids

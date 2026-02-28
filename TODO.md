@@ -80,5 +80,5 @@
 - [x] Backend tests for new persona schema and migrations.
 - [x] Backend tests for prompt assembly with new fields.
 - [x] Frontend tests for full CRUD flows on `/agents`.
-- [ ] Regression tests ensuring default agents persist across restarts.
-- [ ] E2E smoke test: create custom agent -> run review -> comments reflect new output requirements.
+- [x] Regression tests ensuring default agents persist across restarts.
+- [x] E2E smoke test: create custom agent -> run review -> comments reflect new output requirements.
