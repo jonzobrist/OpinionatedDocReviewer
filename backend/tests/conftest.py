@@ -22,6 +22,10 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 @pytest.fixture()
 def client(monkeypatch):
     monkeypatch.setattr(settings, "AUTH_MODE", "header")
+    monkeypatch.setattr(
+        "app.api.review_jobs.enqueue_review_job",
+        lambda job_id, tenant_id: None,
+    )
     Base.metadata.create_all(bind=engine)
 
     def override_get_db():
