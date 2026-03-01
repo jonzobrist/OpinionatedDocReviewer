@@ -1,5 +1,9 @@
 # OpinionatedDocReviewer - Engineering Playbook
 
+## Strategic Context
+Read `THEORY.MD` at session start for the current operating theory — the problem thesis, system model, strategy, and open questions. Use it to orient task prioritization and approach. Update it when understanding changes meaningfully (not on every code change).
+
+
 ## Purpose
 Build a scalable, secure, and fast web application to review documents and multiple document versions using configurable GenAI personas. The UI should look like a professional, modern document review tool with clear persona-themed comments, toggles, and groupings.
 
