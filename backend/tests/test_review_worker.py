@@ -103,6 +103,50 @@ def test_review_worker_generates_comments_and_auto_triggers_meta(monkeypatch) ->
         db.close()
 
 
+def test_review_worker_keeps_completed_status_when_meta_auto_trigger_fails(monkeypatch) -> None:
+    db = SessionLocal()
+    try:
+        tenant_id = "tenant-test-auto-trigger-failure"
+        monkeypatch.setattr("app.reviews.worker.settings.DOC_REPO_ENABLED", False)
+        monkeypatch.setattr("app.reviews.worker.settings.META_AUTO_SYNTHESIS_ENABLED", True)
+        version, job = _seed_review_context(db, tenant_id)
+
+        monkeypatch.setattr(
+            "app.reviews.worker.generate_comments_for_spec",
+            lambda _persona, _content: ['Review: clarify "world" term.'],
+        )
+
+        def _raise_meta_error(**_kwargs):
+            raise RuntimeError("meta synthesis downstream unavailable")
+
+        monkeypatch.setattr("app.reviews.worker.ensure_meta_review_run", _raise_meta_error)
+
+        run_review_job(job.id, tenant_id)
+
+        db.refresh(job)
+        assert job.status == "completed"
+
+        comments = (
+            db.query(models.Comment)
+            .filter(models.Comment.document_version_id == version.id)
+            .all()
+        )
+        assert len(comments) > 0
+
+        runs = (
+            db.query(models.MetaReviewRun)
+            .filter(
+                models.MetaReviewRun.tenant_id == tenant_id,
+                models.MetaReviewRun.document_version_id == version.id,
+                models.MetaReviewRun.review_job_id == job.id,
+            )
+            .all()
+        )
+        assert runs == []
+    finally:
+        db.close()
+
+
 def test_review_worker_skips_meta_auto_trigger_when_disabled(monkeypatch) -> None:
     db = SessionLocal()
     try:
