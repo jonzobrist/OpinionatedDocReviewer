@@ -766,6 +766,50 @@ describe('page controls', () => {
     });
   });
 
+  it('drills down from a meta directive source into the linked reviewer comment', async () => {
+    metaLatestScenario = 'available';
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams('doc=101&mode=meta&directive=9501');
+    render(<HomePage />);
+
+    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    fireEvent.click((await screen.findAllByText('Show sources (1)'))[0]);
+    expect(await screen.findByText('Anchor excerpt: “Design”')).toBeTruthy();
+
+    replaceMock.mockClear();
+    fireEvent.click(await screen.findByRole('button', { name: 'Jump to source #601' }));
+
+    expect(
+      await screen.findByText('Anchored reviewer comments for this document version.')
+    ).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Refresh' })).toBeTruthy();
+    await waitFor(() => {
+      expect(document.querySelector('.comment-card[data-comment-id="601"].selected')).toBeTruthy();
+    });
+    await waitFor(() => {
+      const urls = replaceMock.mock.calls.map((call) => String(call[0]));
+      expect(urls.some((url) => url.includes('mode=individual') && !url.includes('directive='))).toBe(true);
+    });
+  });
+
+  it('supports drill-down roundtrip back to meta mode without breaking meta-first flow', async () => {
+    metaLatestScenario = 'available';
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams('doc=101');
+    render(<HomePage />);
+
+    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+
+    fireEvent.click((await screen.findAllByText('Show sources (1)'))[0]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Jump to source #601' }));
+    expect(await screen.findByRole('button', { name: 'Refresh' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Meta' }));
+    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Clarify the opening section to reduce ambiguity.')).toBeTruthy();
+  });
+
   it('refresh falls back to latest available comments when selected run is empty', async () => {
     mockPathname = '/';
     mockSearchParams = new URLSearchParams('doc=101');
