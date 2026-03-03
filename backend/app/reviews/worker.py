@@ -6,8 +6,10 @@ from app.core.config import settings
 from app.db import models
 from app.db.init_db import seed_default_personas
 from app.db.session import SessionLocal
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout, as_completed
+from app.reviews.meta_reviewer import ensure_meta_review_run
 from app.reviews.parsing import parse_review_output, persist_comment_payloads, normalize_output_requirements, ParsedComment
 from app.reviews.git_repo import ensure_repo
 from app.reviews.review_storage import write_review_and_commit
@@ -16,6 +18,60 @@ from app.reviews.llm_provider import generate_completion, get_provider_name
 
 REVIEW_TIMEOUT_RETRIES = 3
 REVIEW_TIMEOUT_BACKOFF_SECONDS = [1, 2, 4]
+
+logger = logging.getLogger(__name__)
+
+
+def _auto_trigger_meta_synthesis(
+    db: Session,
+    tenant_id: str,
+    review_job_id: int,
+    document_version_id: int,
+) -> None:
+    if not settings.META_AUTO_SYNTHESIS_ENABLED:
+        logger.info(
+            "meta_auto_trigger_disabled tenant_id=%s review_job_id=%s document_version_id=%s",
+            tenant_id,
+            review_job_id,
+            document_version_id,
+        )
+        return
+
+    try:
+        ensured = ensure_meta_review_run(
+            db=db,
+            tenant_id=tenant_id,
+            document_version_id=document_version_id,
+            review_job_id=review_job_id,
+            force=False,
+        )
+    except ValueError as exc:
+        logger.warning(
+            "meta_auto_trigger_skipped tenant_id=%s review_job_id=%s document_version_id=%s reason=%s",
+            tenant_id,
+            review_job_id,
+            document_version_id,
+            exc,
+        )
+        return
+    except Exception:
+        logger.exception(
+            "meta_auto_trigger_failed tenant_id=%s review_job_id=%s document_version_id=%s",
+            tenant_id,
+            review_job_id,
+            document_version_id,
+        )
+        return
+
+    logger.info(
+        "meta_auto_triggered tenant_id=%s review_job_id=%s document_version_id=%s meta_run_id=%s resolution=%s status=%s",
+        tenant_id,
+        review_job_id,
+        document_version_id,
+        ensured.run.id,
+        ensured.resolution,
+        ensured.run.status,
+    )
 
 
 def run_review_job(review_job_id: int, tenant_id: str) -> None:
@@ -146,6 +202,14 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
         job.status = "completed"
         job.completed_at = datetime.now(timezone.utc)
         db.commit()
+
+        _auto_trigger_meta_synthesis(
+            db=db,
+            tenant_id=tenant_id,
+            review_job_id=review_job_id,
+            document_version_id=version.id,
+        )
+
         if settings.DOC_REPO_ENABLED:
             try:
                 repo = ensure_repo(tenant_id, version.document_id)
