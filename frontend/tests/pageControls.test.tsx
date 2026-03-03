@@ -7,6 +7,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 let mockPathname = '/';
 let mockSearchParams = new URLSearchParams();
 let metaLatestScenario: 'missing' | 'available' | 'pending' | 'failed' = 'missing';
+let metaStatusPollSequence: Array<'running' | 'completed' | 'failed' | 'not_found'> = [];
+let metaStatusPollRequestCount = 0;
+let metaStatusReachedCompletion = false;
 
 function applyMockRoute(next: string) {
   const parsed = new URL(next, 'http://localhost');
@@ -45,6 +48,9 @@ describe('page controls', () => {
     mockPathname = '/';
     mockSearchParams = new URLSearchParams();
     metaLatestScenario = 'missing';
+    metaStatusPollSequence = [];
+    metaStatusPollRequestCount = 0;
+    metaStatusReachedCompletion = false;
     pushMock.mockClear();
     replaceMock.mockClear();
     const store = new Map<string, string>();
@@ -202,9 +208,11 @@ describe('page controls', () => {
         ]);
       }
       if (url.includes('/meta-reviews/latest?')) {
-        const targetsPrimaryVersion = url.includes('document_version_id=401');
-        if (targetsPrimaryVersion && metaLatestScenario === 'available') {
-          return json({
+        const parsed = new URL(url, 'http://localhost');
+        const targetsPrimaryVersion = parsed.searchParams.get('document_version_id') === '401';
+        const includeComments = parsed.searchParams.get('include_comments') !== 'false';
+        const asAvailable = () =>
+          json({
             id: 901,
             tenant_id: 'local-dev',
             document_version_id: 401,
@@ -248,9 +256,8 @@ describe('page controls', () => {
               }
             ]
           });
-        }
-        if (targetsPrimaryVersion && metaLatestScenario === 'pending') {
-          return json({
+        const asPending = () =>
+          json({
             id: 902,
             tenant_id: 'local-dev',
             document_version_id: 401,
@@ -264,9 +271,8 @@ describe('page controls', () => {
             created_at: new Date().toISOString(),
             comments: []
           });
-        }
-        if (targetsPrimaryVersion && metaLatestScenario === 'failed') {
-          return json({
+        const asFailed = () =>
+          json({
             id: 904,
             tenant_id: 'local-dev',
             document_version_id: 401,
@@ -280,7 +286,50 @@ describe('page controls', () => {
             created_at: new Date().toISOString(),
             comments: []
           });
+
+        if (!targetsPrimaryVersion) {
+          return json({ detail: 'Meta review run not found' }, 404);
         }
+
+        if (!includeComments) {
+          metaStatusPollRequestCount += 1;
+          const nextPollState = metaStatusPollSequence.shift() ?? null;
+          if (nextPollState === 'running') {
+            return asPending();
+          }
+          if (nextPollState === 'completed') {
+            metaStatusReachedCompletion = true;
+            return json({
+              id: 901,
+              tenant_id: 'local-dev',
+              document_version_id: 401,
+              review_job_id: 501,
+              input_hash: 'meta-hash',
+              status: 'completed',
+              is_synthesized: true,
+              provider: 'openai',
+              model: 'gpt-4o-mini',
+              error_message: null,
+              created_at: new Date().toISOString(),
+              comments: []
+            });
+          }
+          if (nextPollState === 'failed') {
+            return asFailed();
+          }
+          if (nextPollState === 'not_found') {
+            return json({ detail: 'Meta review run not found' }, 404);
+          }
+
+          if (metaStatusReachedCompletion || metaLatestScenario === 'available') return asAvailable();
+          if (metaLatestScenario === 'pending') return asPending();
+          if (metaLatestScenario === 'failed') return asFailed();
+          return json({ detail: 'Meta review run not found' }, 404);
+        }
+
+        if (metaStatusReachedCompletion || metaLatestScenario === 'available') return asAvailable();
+        if (metaLatestScenario === 'pending') return asPending();
+        if (metaLatestScenario === 'failed') return asFailed();
         return json({ detail: 'Meta review run not found' }, 404);
       }
       if (url.endsWith('/meta-reviews') && init?.method === 'POST') {
@@ -627,6 +676,53 @@ describe('page controls', () => {
     expect(await screen.findByText('Meta directives are still being synthesized…')).toBeTruthy();
     expect(await screen.findByText('Meta directives are still being synthesized.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+  });
+
+  it('polls lightweight meta status while pending and hydrates full directives on completion', async () => {
+    metaLatestScenario = 'pending';
+    metaStatusPollSequence = ['running', 'completed'];
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams('doc=101');
+    render(<HomePage />);
+
+    expect(await screen.findByText('Meta directives are still being synthesized.')).toBeTruthy();
+    expect(await screen.findByText('Meta review loaded (1 directives).')).toBeTruthy();
+    expect(await screen.findByText('Clarify the opening section to reduce ambiguity.')).toBeTruthy();
+
+    const calls = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((args) =>
+      String(args[0])
+    );
+    const statusPollCalls = calls.filter(
+      (url) => url.includes('/meta-reviews/latest?') && url.includes('include_comments=false')
+    );
+    expect(statusPollCalls.length).toBeGreaterThan(0);
+    expect(statusPollCalls.some((url) => url.includes('review_job_id=501'))).toBe(true);
+
+    const hydratedCalls = calls.filter(
+      (url) => url.includes('/meta-reviews/latest?') && !url.includes('include_comments=false')
+    );
+    expect(hydratedCalls.length).toBeGreaterThan(1);
+  });
+
+  it('bounds pending meta polling and pauses auto-refresh after max attempts', async () => {
+    metaLatestScenario = 'pending';
+    metaStatusPollSequence = Array.from({ length: 16 }, () => 'running');
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams('doc=101');
+    render(<HomePage />);
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText(
+            'Meta directives are still being synthesized. Auto-refresh paused to avoid noisy polling.'
+          )
+        ).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+
+    expect(metaStatusPollRequestCount).toBe(8);
   });
 
   it('recompute retries meta synthesis from failed state and keeps meta mode active', async () => {
