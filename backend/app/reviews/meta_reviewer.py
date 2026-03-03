@@ -6,6 +6,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -41,6 +42,29 @@ PRIORITY_SCORE = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
 IMPACT_SCORE = {"high": 3.0, "medium": 2.0, "low": 1.0}
 EFFORT_SCORE = {"low": 3.0, "medium": 2.0, "high": 1.0}
 
+META_REVIEW_STATUS_QUEUED = "queued"
+META_REVIEW_STATUS_RUNNING = "running"
+META_REVIEW_STATUS_COMPLETED = "completed"
+META_REVIEW_STATUS_FAILED = "failed"
+META_REVIEW_VALID_STATUSES = {
+    META_REVIEW_STATUS_QUEUED,
+    META_REVIEW_STATUS_RUNNING,
+    META_REVIEW_STATUS_COMPLETED,
+    META_REVIEW_STATUS_FAILED,
+}
+META_REVIEW_RESOLUTION_CREATED = "created"
+META_REVIEW_RESOLUTION_REUSED = "reused"
+META_REVIEW_ERROR_CODE_GENERIC = "meta_synthesis_failed"
+META_REVIEW_ERROR_CODE_INPUT = "meta_input_invalid"
+META_REVIEW_ERROR_CODE_PROVIDER = "meta_provider_unavailable"
+META_REVIEW_GENERIC_ERROR_MESSAGE = "Meta synthesis failed. Please retry."
+MAX_SAFE_META_ERROR_MESSAGE_CHARS = 400
+SENSITIVE_ERROR_PATTERNS = [
+    re.compile(r"sk-[A-Za-z0-9]{8,}"),
+    re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]+"),
+    re.compile(r"(?i)api[_-]?key\s*[:=]\s*[^\s,;]+"),
+]
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,6 +96,19 @@ class MetaDirectiveCandidate:
     contributing_reviewers: list[str]
     source_comments: list[models.Comment]
     is_unsynthesized: bool
+
+
+@dataclass
+class MetaReviewInputContext:
+    comments: list[models.Comment]
+    review_job_id: int | None
+    input_hash: str
+
+
+@dataclass
+class MetaReviewEnsureResult:
+    run: models.MetaReviewRun
+    resolution: str
 
 
 def build_input_hash(comments: list[models.Comment]) -> str:
@@ -483,14 +520,79 @@ def dedupe_directives(candidates: list[MetaDirectiveCandidate]) -> list[MetaDire
     return deduped
 
 
-def run_meta_review(
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _redact_sensitive_segments(message: str) -> str:
+    sanitized = message
+    for pattern in SENSITIVE_ERROR_PATTERNS:
+        sanitized = pattern.sub("[redacted]", sanitized)
+    return sanitized
+
+
+def _sanitize_error_message(message: str | None) -> str:
+    if not message:
+        return META_REVIEW_GENERIC_ERROR_MESSAGE
+    compact = " ".join(message.split())
+    compact = _redact_sensitive_segments(compact).strip()
+    if not compact:
+        return META_REVIEW_GENERIC_ERROR_MESSAGE
+    if len(compact) > MAX_SAFE_META_ERROR_MESSAGE_CHARS:
+        compact = compact[: MAX_SAFE_META_ERROR_MESSAGE_CHARS - 1].rstrip() + "…"
+    return compact
+
+
+def _safe_failure_details(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, ValueError):
+        return META_REVIEW_ERROR_CODE_INPUT, _sanitize_error_message(str(exc))
+    if isinstance(exc, LLMProviderError):
+        return META_REVIEW_ERROR_CODE_PROVIDER, "Meta synthesis provider unavailable. Please retry."
+    return META_REVIEW_ERROR_CODE_GENERIC, META_REVIEW_GENERIC_ERROR_MESSAGE
+
+
+def normalize_meta_review_run_state(run: models.MetaReviewRun) -> models.MetaReviewRun:
+    status = (run.status or META_REVIEW_STATUS_COMPLETED).strip().lower()
+    if status not in META_REVIEW_VALID_STATUSES:
+        status = META_REVIEW_STATUS_FAILED if run.error_message else META_REVIEW_STATUS_COMPLETED
+    run.status = status
+
+    if run.queued_at is None:
+        run.queued_at = run.created_at
+
+    if status in {
+        META_REVIEW_STATUS_RUNNING,
+        META_REVIEW_STATUS_COMPLETED,
+        META_REVIEW_STATUS_FAILED,
+    } and run.running_at is None:
+        run.running_at = run.queued_at or run.created_at
+
+    if status == META_REVIEW_STATUS_COMPLETED and run.completed_at is None:
+        run.completed_at = run.created_at
+    if status != META_REVIEW_STATUS_COMPLETED:
+        run.completed_at = None
+
+    if status == META_REVIEW_STATUS_FAILED:
+        if run.failed_at is None:
+            run.failed_at = run.created_at
+        run.error_code = run.error_code or META_REVIEW_ERROR_CODE_GENERIC
+        run.error_message = _sanitize_error_message(run.error_message)
+    else:
+        run.failed_at = None
+
+    if status != META_REVIEW_STATUS_FAILED:
+        run.error_code = None
+        run.error_message = None
+
+    return run
+
+
+def _resolve_meta_review_input_context(
     db: Session,
     tenant_id: str,
     document_version_id: int,
-    review_job_id: int | None = None,
-    force: bool = False,
-) -> models.MetaReviewRun:
-    started = time.perf_counter()
+    review_job_id: int | None,
+) -> MetaReviewInputContext:
     effective_review_job_id = review_job_id
     query = db.query(models.Comment).filter(
         models.Comment.tenant_id == tenant_id,
@@ -522,61 +624,116 @@ def run_meta_review(
             f"Too many source comments for meta synthesis ({len(comments)} > {MAX_META_COMMENTS_INPUT})"
         )
 
-    input_hash = build_input_hash(comments)
+    return MetaReviewInputContext(
+        comments=comments,
+        review_job_id=effective_review_job_id,
+        input_hash=build_input_hash(comments),
+    )
+
+
+def _find_matching_meta_run(
+    db: Session,
+    tenant_id: str,
+    document_version_id: int,
+    review_job_id: int | None,
+    input_hash: str,
+) -> models.MetaReviewRun | None:
+    run = (
+        db.query(models.MetaReviewRun)
+        .filter(
+            models.MetaReviewRun.tenant_id == tenant_id,
+            models.MetaReviewRun.document_version_id == document_version_id,
+            models.MetaReviewRun.review_job_id == review_job_id,
+            models.MetaReviewRun.input_hash == input_hash,
+        )
+        .order_by(models.MetaReviewRun.created_at.desc(), models.MetaReviewRun.id.desc())
+        .first()
+    )
+    if run:
+        normalize_meta_review_run_state(run)
+    return run
+
+
+def ensure_meta_review_run(
+    db: Session,
+    tenant_id: str,
+    document_version_id: int,
+    review_job_id: int | None = None,
+    force: bool = False,
+) -> MetaReviewEnsureResult:
+    started = time.perf_counter()
+    context = _resolve_meta_review_input_context(db, tenant_id, document_version_id, review_job_id)
+    comments = context.comments
+    effective_review_job_id = context.review_job_id
+    input_hash = context.input_hash
+
     if not force:
-        cached = (
-            db.query(models.MetaReviewRun)
-            .filter(
-                models.MetaReviewRun.tenant_id == tenant_id,
-                models.MetaReviewRun.document_version_id == document_version_id,
-                models.MetaReviewRun.review_job_id == effective_review_job_id,
-                models.MetaReviewRun.input_hash == input_hash,
-            )
-            .order_by(models.MetaReviewRun.id.desc())
-            .first()
+        cached = _find_matching_meta_run(
+            db,
+            tenant_id,
+            document_version_id,
+            effective_review_job_id,
+            input_hash,
         )
         if cached:
-            return cached
+            return MetaReviewEnsureResult(run=cached, resolution=META_REVIEW_RESOLUTION_REUSED)
 
     run = models.MetaReviewRun(
         tenant_id=tenant_id,
         document_version_id=document_version_id,
         review_job_id=effective_review_job_id,
         input_hash=input_hash,
-        status="running",
-        is_synthesized=True,
+        status=META_REVIEW_STATUS_QUEUED,
+        queued_at=_utcnow(),
+        running_at=None,
+        completed_at=None,
+        failed_at=None,
+        is_synthesized=False,
         provider=get_provider_name(),
         model=get_model_label(),
+        error_code=None,
+        error_message=None,
     )
     db.add(run)
     db.flush()
 
-    personas = (
-        db.query(models.Persona)
-        .filter(models.Persona.tenant_id == tenant_id)
-        .order_by(models.Persona.id.asc())
-        .all()
-    )
-    persona_map = {persona.id: persona for persona in personas}
+    run.status = META_REVIEW_STATUS_RUNNING
+    run.running_at = _utcnow()
+    db.commit()
+    db.refresh(run)
 
-    version = (
-        db.query(models.DocumentVersion)
-        .filter(
-            models.DocumentVersion.tenant_id == tenant_id,
-            models.DocumentVersion.id == document_version_id,
-        )
-        .first()
-    )
-    content = version.content if version else ""
-    groups = group_comments_by_location(comments)
-    if len(groups) > MAX_META_GROUPS:
-        raise ValueError(f"Too many comment groups for meta synthesis ({len(groups)} > {MAX_META_GROUPS})")
-
-    synthesized_all = True
-    candidates: list[MetaDirectiveCandidate] = []
-    order_index = 0
+    groups: list[CommentGroup] = []
+    synthesized_all = False
 
     try:
+        personas = (
+            db.query(models.Persona)
+            .filter(models.Persona.tenant_id == tenant_id)
+            .order_by(models.Persona.id.asc())
+            .all()
+        )
+        persona_map = {persona.id: persona for persona in personas}
+
+        version = (
+            db.query(models.DocumentVersion)
+            .filter(
+                models.DocumentVersion.tenant_id == tenant_id,
+                models.DocumentVersion.id == document_version_id,
+            )
+            .first()
+        )
+        content = version.content if version else ""
+
+        groups = group_comments_by_location(comments)
+        if len(groups) > MAX_META_GROUPS:
+            raise ValueError(
+                f"Too many comment groups for meta synthesis ({len(groups)} > {MAX_META_GROUPS})"
+            )
+
+        synthesized_all = True
+        candidates: list[MetaDirectiveCandidate] = []
+        order_index = 0
+
         for group in groups:
             directives, synthesized = synthesize_group(group, persona_map, content)
             synthesized_all = synthesized_all and synthesized
@@ -663,14 +820,33 @@ def run_meta_review(
                     )
                 )
 
-        run.status = "completed"
+        run.status = META_REVIEW_STATUS_COMPLETED
+        run.completed_at = _utcnow()
+        run.failed_at = None
         run.is_synthesized = synthesized_all
+        run.error_code = None
         run.error_message = None
         db.commit()
     except Exception as exc:
-        run.status = "failed"
+        db.rollback()
+        run = (
+            db.query(models.MetaReviewRun)
+            .filter(
+                models.MetaReviewRun.id == run.id,
+                models.MetaReviewRun.tenant_id == tenant_id,
+            )
+            .first()
+        )
+        if run is None:
+            raise
+
+        error_code, error_message = _safe_failure_details(exc)
+        run.status = META_REVIEW_STATUS_FAILED
+        run.failed_at = _utcnow()
+        run.completed_at = None
         run.is_synthesized = False
-        run.error_message = str(exc)
+        run.error_code = error_code
+        run.error_message = error_message
         db.commit()
         logger.exception(
             "meta_review_failed tenant=%s version=%s review_job=%s input_hash=%s error=%s",
@@ -684,10 +860,11 @@ def run_meta_review(
     finally:
         duration_ms = int((time.perf_counter() - started) * 1000)
         logger.info(
-            "meta_review_completed tenant=%s version=%s review_job=%s groups=%s source_comments=%s synthesized=%s duration_ms=%s",
+            "meta_review_completed tenant=%s version=%s review_job=%s status=%s groups=%s source_comments=%s synthesized=%s duration_ms=%s",
             tenant_id,
             document_version_id,
             effective_review_job_id,
+            run.status,
             len(groups),
             len(comments),
             synthesized_all,
@@ -695,4 +872,21 @@ def run_meta_review(
         )
 
     db.refresh(run)
-    return run
+    normalize_meta_review_run_state(run)
+    return MetaReviewEnsureResult(run=run, resolution=META_REVIEW_RESOLUTION_CREATED)
+
+
+def run_meta_review(
+    db: Session,
+    tenant_id: str,
+    document_version_id: int,
+    review_job_id: int | None = None,
+    force: bool = False,
+) -> models.MetaReviewRun:
+    return ensure_meta_review_run(
+        db=db,
+        tenant_id=tenant_id,
+        document_version_id=document_version_id,
+        review_job_id=review_job_id,
+        force=force,
+    ).run

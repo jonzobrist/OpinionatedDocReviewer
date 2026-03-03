@@ -148,14 +148,31 @@ class MetaReviewRun(Base):
         Integer, ForeignKey("review_jobs.id", ondelete="SET NULL"), index=True, default=None
     )
     input_hash: Mapped[str] = mapped_column(String(128), index=True)
-    status: Mapped[str] = mapped_column(String(32), default="completed")
+    status: Mapped[str] = mapped_column(String(32), default="queued")
+    queued_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    running_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    failed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     is_synthesized: Mapped[bool] = mapped_column(Boolean, default=True)
     provider: Mapped[str] = mapped_column(String(50), default="openai")
     model: Mapped[str] = mapped_column(String(200), default="gpt-4o-mini")
+    error_code: Mapped[str | None] = mapped_column(String(64), default=None)
     error_message: Mapped[str | None] = mapped_column(String(2000), default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
+
+    @property
+    def error_details(self) -> dict | None:
+        if self.status != "failed":
+            return None
+        return {
+            "code": self.error_code or "meta_synthesis_failed",
+            "message": self.error_message or "Meta synthesis failed. Please retry.",
+            "retryable": True,
+        }
 
     review_job: Mapped[ReviewJob | None] = relationship("ReviewJob", back_populates="meta_review_runs")
     comments: Mapped[List["MetaComment"]] = relationship(

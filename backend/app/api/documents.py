@@ -405,8 +405,17 @@ def import_bundle(
             is_synthesized=payload.meta_review_run.is_synthesized,
             provider=payload.meta_review_run.provider,
             model=payload.meta_review_run.model,
+            error_code=payload.meta_review_run.error_code,
             error_message=payload.meta_review_run.error_message,
         )
+        if payload.meta_review_run.queued_at is not None:
+            run_data["queued_at"] = payload.meta_review_run.queued_at
+        if payload.meta_review_run.running_at is not None:
+            run_data["running_at"] = payload.meta_review_run.running_at
+        if payload.meta_review_run.completed_at is not None:
+            run_data["completed_at"] = payload.meta_review_run.completed_at
+        if payload.meta_review_run.failed_at is not None:
+            run_data["failed_at"] = payload.meta_review_run.failed_at
         if payload.meta_review_run.created_at is not None:
             run_data["created_at"] = payload.meta_review_run.created_at
         run = models.MetaReviewRun(**run_data)

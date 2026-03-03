@@ -309,6 +309,11 @@ def _ensure_schema() -> None:
         _ensure_column(connection, "meta_comments", "assignee", "TEXT")
         _ensure_column(connection, "meta_comments", "due_at", "TEXT")
         _ensure_column(connection, "meta_comments", "rank_score", "REAL DEFAULT 0")
+        _ensure_column(connection, "meta_review_runs", "queued_at", "DATETIME")
+        _ensure_column(connection, "meta_review_runs", "running_at", "DATETIME")
+        _ensure_column(connection, "meta_review_runs", "completed_at", "DATETIME")
+        _ensure_column(connection, "meta_review_runs", "failed_at", "DATETIME")
+        _ensure_column(connection, "meta_review_runs", "error_code", "TEXT")
         connection.execute(
             text("UPDATE review_jobs SET trigger='auto' WHERE trigger IS NULL")
         )
@@ -362,6 +367,36 @@ def _ensure_schema() -> None:
         )
         connection.execute(
             text("UPDATE meta_comments SET rank_score=0 WHERE rank_score IS NULL")
+        )
+        connection.execute(
+            text("UPDATE meta_review_runs SET status='completed' WHERE status IS NULL OR status=''")
+        )
+        connection.execute(
+            text("UPDATE meta_review_runs SET queued_at=created_at WHERE queued_at IS NULL")
+        )
+        connection.execute(
+            text(
+                "UPDATE meta_review_runs SET running_at=COALESCE(running_at, queued_at, created_at) "
+                "WHERE status IN ('running', 'completed', 'failed')"
+            )
+        )
+        connection.execute(
+            text(
+                "UPDATE meta_review_runs SET completed_at=COALESCE(completed_at, created_at) "
+                "WHERE status='completed' AND completed_at IS NULL"
+            )
+        )
+        connection.execute(
+            text(
+                "UPDATE meta_review_runs SET failed_at=COALESCE(failed_at, created_at) "
+                "WHERE status='failed' AND failed_at IS NULL"
+            )
+        )
+        connection.execute(
+            text(
+                "UPDATE meta_review_runs SET error_code='meta_synthesis_failed' "
+                "WHERE status='failed' AND (error_code IS NULL OR error_code='')"
+            )
         )
         connection.commit()
 
