@@ -130,6 +130,7 @@ class Settings(BaseSettings):
     ALLOWED_HOSTS: str = "*"
     TRUST_PROXY_HEADERS: bool = False
     PROXY_TRUSTED_IPS: str = "127.0.0.1"
+    META_AUTO_SYNTHESIS_ENABLED: bool = True
     META_AGENT_NAME: str = "Meta Reviewer"
     META_AGENT_DESCRIPTION: str = "Synthesizes reviewer comments into ranked directives."
     META_AGENT_SYSTEM_PROMPT: str = (
