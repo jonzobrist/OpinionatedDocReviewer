@@ -80,9 +80,14 @@ class BundleMetaComment(BaseModel):
 
 class BundleMetaReviewRun(BaseModel):
     status: str = "completed"
+    queued_at: datetime | None = None
+    running_at: datetime | None = None
+    completed_at: datetime | None = None
+    failed_at: datetime | None = None
     is_synthesized: bool = True
     provider: str = "import"
     model: str = "bundle"
+    error_code: str | None = None
     error_message: str | None = None
     created_at: datetime | None = None
     comments: list[BundleMetaComment] = Field(default_factory=list)

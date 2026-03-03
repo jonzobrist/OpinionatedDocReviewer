@@ -1,14 +1,30 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+MetaReviewStatus = Literal["queued", "running", "completed", "failed"]
+MetaReviewResolution = Literal["reused", "created"]
 
 
 class MetaReviewCreate(BaseModel):
     document_version_id: int = Field(gt=0)
     review_job_id: int | None = Field(default=None, gt=0)
     force: bool = False
+
+
+class MetaReviewEnsureRequest(BaseModel):
+    document_version_id: int = Field(gt=0)
+    review_job_id: int | None = Field(default=None, gt=0)
+    force: bool = False
+
+
+class MetaReviewErrorDetailRead(BaseModel):
+    code: str
+    message: str
+    retryable: bool = True
 
 
 class MetaCommentSourceRead(BaseModel):
@@ -51,12 +67,22 @@ class MetaReviewRunRead(BaseModel):
     document_version_id: int
     review_job_id: int | None
     input_hash: str
-    status: str
+    status: MetaReviewStatus
+    queued_at: datetime | None = None
+    running_at: datetime | None = None
+    completed_at: datetime | None = None
+    failed_at: datetime | None = None
     is_synthesized: bool
     provider: str
     model: str
+    error_code: str | None = None
     error_message: str | None
+    error_details: MetaReviewErrorDetailRead | None = None
     created_at: datetime
     comments: list[MetaCommentRead]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class MetaReviewEnsureRead(MetaReviewRunRead):
+    resolution: MetaReviewResolution
