@@ -236,17 +236,24 @@ function HomePageContent() {
   const hoveredMetaCommentIdRef = useRef<number | null>(null);
   const hoverAlignFrameRef = useRef<number | null>(null);
   const handledRouteIntentRef = useRef<string | null>(null);
+  const isApplyingRouteQueryStateRef = useRef(false);
   const importAgentsInputRef = useRef<HTMLInputElement | null>(null);
   const importReviewBundleInputRef = useRef<HTMLInputElement | null>(null);
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const searchParamsKey = searchParams.toString();
+  const latestSearchParamsKeyRef = useRef(searchParamsKey);
   const normalizedPath = (pathname || '/').toLowerCase();
   const showLibrary = normalizedPath === '/library';
   const showAgents = normalizedPath === '/agents';
   const showHistory = normalizedPath === '/history';
   const showSettings = normalizedPath === '/system';
   const showAdmin = normalizedPath === '/admin';
+
+  useEffect(() => {
+    latestSearchParamsKeyRef.current = searchParamsKey;
+  }, [searchParamsKey]);
 
   const selectedDocument = useMemo(() => {
     const fromLibrary = libraryEntries.find((doc) => doc.id === selectedDocumentId);
@@ -335,8 +342,15 @@ function HomePageContent() {
   useEffect(() => {
     setMetaReviewRun(null);
     setMetaViewState('idle');
-    setCommentModeSelectionSource('auto');
-    setCommentViewMode('meta');
+    const routeParams = new URLSearchParams(latestSearchParamsKeyRef.current);
+    const requestedMode = parseCommentViewModeParam(routeParams.get('mode'));
+    if (requestedMode) {
+      setCommentModeSelectionSource('manual');
+      setCommentViewMode(requestedMode);
+    } else {
+      setCommentModeSelectionSource('auto');
+      setCommentViewMode('meta');
+    }
     setMetaCategoryFilter('all');
   }, [selectedVersionId, selectedReviewJobId]);
 
@@ -1614,6 +1628,16 @@ function HomePageContent() {
         : null;
 
   useEffect(() => {
+    if (commentViewMode !== 'meta') return;
+    if (!focusedMetaCommentId) return;
+    if (metaViewState !== 'ready') return;
+    const existsInRun = metaReviewRun?.comments?.some((comment) => comment.id === focusedMetaCommentId);
+    if (existsInRun) return;
+    setFocusedMetaCommentId(null);
+    setStatusMessage(`Requested directive #${focusedMetaCommentId} is not available for this run.`);
+  }, [commentViewMode, focusedMetaCommentId, metaViewState, metaReviewRun]);
+
+  useEffect(() => {
     if (!hoveredMetaCommentId || focusedMetaCommentId) return;
     if (commentViewMode !== 'meta') return;
     if (hoverAlignFrameRef.current !== null) {
@@ -1659,9 +1683,20 @@ function HomePageContent() {
   }, [hoveredMetaCommentId]);
 
   useEffect(() => {
+    const routeParams = new URLSearchParams(searchParamsKey);
+    const requestedDirectiveId = parsePositiveIntParam(routeParams.get('directive'));
+    setHoveredMetaCommentId(null);
+    if (requestedDirectiveId !== null) {
+      return;
+    }
+    setFocusedMetaCommentId(null);
+  }, [selectedVersionId, selectedReviewJobId, searchParamsKey]);
+
+  useEffect(() => {
+    if (commentViewMode === 'meta') return;
     setHoveredMetaCommentId(null);
     setFocusedMetaCommentId(null);
-  }, [selectedVersionId, selectedReviewJobId, commentViewMode]);
+  }, [commentViewMode]);
 
   useEffect(() => {
     const root = docBodyRef.current;
@@ -2149,11 +2184,80 @@ function HomePageContent() {
 
   useEffect(() => {
     if (normalizedPath !== '/') return;
-    const docRaw = searchParams.get('doc');
+
+    const routeParams = new URLSearchParams(searchParamsKey);
+    let appliedRouteState = false;
+    const requestedMode = parseCommentViewModeParam(routeParams.get('mode'));
+    const requestedDirectiveId = parsePositiveIntParam(routeParams.get('directive'));
+
+    if (requestedMode && requestedMode !== commentViewMode) {
+      setCommentModeSelectionSource('manual');
+      setCommentViewMode(requestedMode);
+      appliedRouteState = true;
+    }
+
+    if (requestedDirectiveId !== null && requestedMode !== 'individual') {
+      if (requestedMode !== 'meta' && commentViewMode !== 'meta') {
+        setCommentModeSelectionSource('manual');
+        setCommentViewMode('meta');
+        appliedRouteState = true;
+      }
+      if (focusedMetaCommentId !== requestedDirectiveId) {
+        setFocusedMetaCommentId(requestedDirectiveId);
+        appliedRouteState = true;
+      }
+    } else if (requestedDirectiveId === null && focusedMetaCommentId !== null) {
+      setFocusedMetaCommentId(null);
+      appliedRouteState = true;
+    }
+
+    if (appliedRouteState) {
+      isApplyingRouteQueryStateRef.current = true;
+    }
+  }, [normalizedPath, searchParamsKey, selectedVersionId, selectedReviewJobId]);
+
+  useEffect(() => {
+    if (normalizedPath !== '/') return;
+
+    if (isApplyingRouteQueryStateRef.current) {
+      isApplyingRouteQueryStateRef.current = false;
+      return;
+    }
+
+    const currentParams = new URLSearchParams(searchParamsKey);
+    const hasDocumentContext = selectedDocumentId !== null || Boolean(currentParams.get('doc'));
+    if (!hasDocumentContext) return;
+
+    const nextParams = new URLSearchParams(currentParams.toString());
+    nextParams.set('mode', commentViewMode);
+    if (commentViewMode === 'meta' && focusedMetaCommentId !== null) {
+      nextParams.set('directive', String(focusedMetaCommentId));
+    } else {
+      nextParams.delete('directive');
+    }
+
+    const currentQuery = currentParams.toString();
+    const nextQuery = nextParams.toString();
+    if (currentQuery === nextQuery) return;
+
+    router.replace(nextQuery ? `/?${nextQuery}` : '/');
+  }, [
+    normalizedPath,
+    searchParamsKey,
+    selectedDocumentId,
+    commentViewMode,
+    focusedMetaCommentId,
+    router
+  ]);
+
+  useEffect(() => {
+    if (normalizedPath !== '/') return;
+    const routeParams = new URLSearchParams(searchParamsKey);
+    const docRaw = routeParams.get('doc');
     if (!docRaw) return;
     const docId = Number(docRaw);
     if (!Number.isFinite(docId) || docId <= 0) return;
-    const runRequested = searchParams.get('run') === '1';
+    const runRequested = routeParams.get('run') === '1';
     const intentKey = `${docId}:${runRequested ? 'run' : 'open'}`;
     if (handledRouteIntentRef.current === intentKey) return;
     handledRouteIntentRef.current = intentKey;
@@ -2167,7 +2271,7 @@ function HomePageContent() {
         router.replace(`/?doc=${docId}`);
       }
     })();
-  }, [normalizedPath, searchParams]);
+  }, [normalizedPath, searchParamsKey]);
 
   function navigatePanel(path: '/library' | '/agents' | '/history' | '/system' | '/admin') {
     if (normalizedPath === path) {
@@ -5103,6 +5207,22 @@ function isMetaSynthesisFailedStatus(status: string | null | undefined): boolean
   if (!status) return false;
   const normalized = status.trim().toLowerCase();
   return normalized === 'failed' || normalized === 'error';
+}
+
+function parseCommentViewModeParam(value: string | null): 'individual' | 'meta' | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'individual' || normalized === 'meta') {
+    return normalized;
+  }
+  return null;
+}
+
+function parsePositiveIntParam(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) return null;
+  return parsed;
 }
 
 function buildCommentSignature(comments: CommentRead[]): string {

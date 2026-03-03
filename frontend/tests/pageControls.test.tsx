@@ -656,6 +656,64 @@ describe('page controls', () => {
     expect(await screen.findByRole('button', { name: 'Refresh' })).toBeTruthy();
   });
 
+  it('restores individual mode from URL query state', async () => {
+    metaLatestScenario = 'available';
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams('doc=101&mode=individual');
+    render(<HomePage />);
+
+    expect(
+      await screen.findByText('Anchored reviewer comments for this document version.')
+    ).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Refresh' })).toBeTruthy();
+  });
+
+  it('persists and restores selected meta directive via URL query state', async () => {
+    metaLatestScenario = 'available';
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams('doc=101&mode=meta&directive=9501');
+    render(<HomePage />);
+
+    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    await waitFor(() => {
+      expect(document.querySelector('.comment-card[data-meta-id="9501"].selected')).toBeTruthy();
+    });
+
+    replaceMock.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Individual' }));
+    await waitFor(() => {
+      const urls = replaceMock.mock.calls.map((call) => String(call[0]));
+      expect(urls.some((url) => url.includes('mode=individual') && !url.includes('directive='))).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Meta' }));
+    let directiveCard: Element | null = null;
+    await waitFor(() => {
+      directiveCard = document.querySelector('.comment-card[data-meta-id="9501"]');
+      expect(directiveCard).toBeTruthy();
+    });
+    fireEvent.click(directiveCard as HTMLElement);
+    await waitFor(() => {
+      const urls = replaceMock.mock.calls.map((call) => String(call[0]));
+      expect(urls.some((url) => url.includes('mode=meta') && url.includes('directive=9501'))).toBe(true);
+    });
+  });
+
+  it('clears invalid directive IDs from URL state gracefully', async () => {
+    metaLatestScenario = 'available';
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams('doc=101&mode=meta&directive=9999');
+    render(<HomePage />);
+
+    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Requested directive #9999 is not available for this run.')).toBeTruthy();
+
+    await waitFor(() => {
+      const urls = replaceMock.mock.calls.map((call) => String(call[0]));
+      expect(urls.some((url) => url.includes('mode=meta') && !url.includes('directive='))).toBe(true);
+    });
+  });
+
   it('refresh falls back to latest available comments when selected run is empty', async () => {
     mockPathname = '/';
     mockSearchParams = new URLSearchParams('doc=101');
