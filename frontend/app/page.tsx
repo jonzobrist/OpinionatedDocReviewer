@@ -55,6 +55,7 @@ const AGENT_COLORS = ['#1d8a7a', '#2d6eea', '#b7482f', '#7a4bd3', '#c57a1b', '#0
 
 type DocSegment = { text: string; comment?: CommentRead };
 type ConnectorPath = { id: string; path: string; color: string };
+type MetaViewState = 'idle' | 'loading' | 'ready' | 'pending' | 'missing' | 'error';
 type AgentDraft = {
   name: string;
   description: string;
@@ -169,7 +170,10 @@ function HomePageContent() {
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [selectedReviewJobId, setSelectedReviewJobId] = useState<number | null>(null);
   const [docMode, setDocMode] = useState<'view' | 'source'>('view');
-  const [commentViewMode, setCommentViewMode] = useState<'individual' | 'meta'>('individual');
+  const [commentViewMode, setCommentViewMode] = useState<'individual' | 'meta'>('meta');
+  const [commentModeSelectionSource, setCommentModeSelectionSource] = useState<'auto' | 'manual'>(
+    'auto'
+  );
   const [focusedCommentId, setFocusedCommentId] = useState<number | null>(null);
   const [hoveredCommentId, setHoveredCommentId] = useState<number | null>(null);
   const [focusedMetaCommentId, setFocusedMetaCommentId] = useState<number | null>(null);
@@ -182,6 +186,7 @@ function HomePageContent() {
   const [recentCommentIds, setRecentCommentIds] = useState<Set<number>>(new Set());
   const [agentThemes, setAgentThemes] = useState<Record<string, AgentTheme>>({});
   const [metaReviewRun, setMetaReviewRun] = useState<MetaReviewRunRead | null>(null);
+  const [metaViewState, setMetaViewState] = useState<MetaViewState>('idle');
   const [isMetaLoading, setIsMetaLoading] = useState(false);
   const [metaCategoryFilter, setMetaCategoryFilter] = useState<
     'all' | 'structure' | 'clarity' | 'technical' | 'security' | 'accessibility' | 'style'
@@ -329,15 +334,26 @@ function HomePageContent() {
 
   useEffect(() => {
     setMetaReviewRun(null);
-    setCommentViewMode('individual');
+    setMetaViewState('idle');
+    setCommentModeSelectionSource('auto');
+    setCommentViewMode('meta');
     setMetaCategoryFilter('all');
   }, [selectedVersionId, selectedReviewJobId]);
 
   useEffect(() => {
     if (commentViewMode !== 'meta') return;
     if (!selectedVersionId) return;
-    void loadOrCreateMetaReview(selectedVersionId, selectedReviewJobId, false);
-  }, [commentViewMode, selectedVersionId, selectedReviewJobId]);
+    void loadOrCreateMetaReview(selectedVersionId, selectedReviewJobId, false, {
+      fallbackToIndividualOnMissing: commentModeSelectionSource === 'auto',
+      reviewJobStatus: selectedReviewJob?.status ?? null
+    });
+  }, [
+    commentViewMode,
+    selectedVersionId,
+    selectedReviewJobId,
+    selectedReviewJob?.status,
+    commentModeSelectionSource
+  ]);
 
   useEffect(() => {
     if (!focusedCommentId) return;
@@ -693,9 +709,14 @@ function HomePageContent() {
   async function loadOrCreateMetaReview(
     versionId: number,
     reviewJobId?: number | null,
-    force = false
+    force = false,
+    options?: {
+      fallbackToIndividualOnMissing?: boolean;
+      reviewJobStatus?: string | null;
+    }
   ) {
     setIsMetaLoading(true);
+    setMetaViewState('loading');
     try {
       if (!force) {
         const query = reviewJobId
@@ -704,11 +725,24 @@ function HomePageContent() {
         try {
           const latest = await apiFetch<MetaReviewRunRead>(query);
           setMetaReviewRun(latest);
-          setStatusMessage(
-            latest.comments.length > 0
-              ? `Meta review loaded (${latest.comments.length} directives).`
-              : 'No meta directives yet. Run review first, then recompute meta.'
-          );
+          if (isMetaSynthesisPendingStatus(latest.status)) {
+            setMetaViewState('pending');
+            setStatusMessage('Meta directives are still being synthesized.');
+          } else if (isMetaSynthesisFailedStatus(latest.status)) {
+            setMetaViewState('error');
+            setStatusMessage(
+              latest.error_message
+                ? `Meta synthesis failed: ${latest.error_message}`
+                : 'Meta synthesis failed. Recompute to retry.'
+            );
+          } else {
+            setMetaViewState('ready');
+            setStatusMessage(
+              latest.comments.length > 0
+                ? `Meta review loaded (${latest.comments.length} directives).`
+                : 'Meta review loaded (no directives).'
+            );
+          }
           return latest;
         } catch (error) {
           const message = normalizeError(error);
@@ -720,8 +754,26 @@ function HomePageContent() {
           if (!missingMetaRun) {
             throw error;
           }
+
+          setMetaReviewRun(null);
+          const synthesisPending = isMetaSynthesisPendingStatus(options?.reviewJobStatus);
+          if (synthesisPending) {
+            setMetaViewState('pending');
+            setStatusMessage('Meta directives are pending while the active review run is still processing.');
+            return null;
+          }
+
+          setMetaViewState('missing');
+          if (options?.fallbackToIndividualOnMissing) {
+            setCommentViewMode('individual');
+            setStatusMessage('No meta directives found for this run yet. Showing individual reviewer comments.');
+          } else {
+            setStatusMessage('No meta directives available for this run yet. Recompute to synthesize now.');
+          }
+          return null;
         }
       }
+
       const created = await apiFetch<MetaReviewRunRead>('/meta-reviews', {
         method: 'POST',
         body: JSON.stringify({
@@ -731,15 +783,29 @@ function HomePageContent() {
         })
       });
       setMetaReviewRun(created);
-      setStatusMessage(
-        created.comments.length > 0
-          ? `Meta review ready (${created.comments.length} directives).`
-          : 'No meta directives produced for this version.'
-      );
+      if (isMetaSynthesisPendingStatus(created.status)) {
+        setMetaViewState('pending');
+        setStatusMessage('Meta synthesis queued. Directives will appear shortly.');
+      } else if (isMetaSynthesisFailedStatus(created.status)) {
+        setMetaViewState('error');
+        setStatusMessage(
+          created.error_message
+            ? `Meta synthesis failed: ${created.error_message}`
+            : 'Meta synthesis failed. Recompute to retry.'
+        );
+      } else {
+        setMetaViewState('ready');
+        setStatusMessage(
+          created.comments.length > 0
+            ? `Meta review ready (${created.comments.length} directives).`
+            : 'No meta directives produced for this version.'
+        );
+      }
       return created;
     } catch (error) {
       const message = normalizeError(error);
       setErrorMessage(message);
+      setMetaViewState('error');
       if (message.toLowerCase().includes('no reviewer comments available yet')) {
         setStatusMessage('Meta review is waiting for reviewer comments to arrive.');
       }
@@ -2746,14 +2812,20 @@ function HomePageContent() {
                   <button
                     className={`mode-button ${commentViewMode === 'individual' ? 'active' : ''}`}
                     type="button"
-                    onClick={() => setCommentViewMode('individual')}
+                    onClick={() => {
+                      setCommentModeSelectionSource('manual');
+                      setCommentViewMode('individual');
+                    }}
                   >
                     Individual
                   </button>
                   <button
                     className={`mode-button ${commentViewMode === 'meta' ? 'active' : ''}`}
                     type="button"
-                    onClick={() => setCommentViewMode('meta')}
+                    onClick={() => {
+                      setCommentModeSelectionSource('manual');
+                      setCommentViewMode('meta');
+                    }}
                   >
                     Meta
                   </button>
@@ -2911,15 +2983,28 @@ function HomePageContent() {
                 );
               })}
               {commentViewMode === 'meta' && isMetaLoading && (
-                <div className="empty-feed">Synthesizing meta comments…</div>
+                <div className="empty-feed">Loading meta directives…</div>
+              )}
+              {commentViewMode === 'meta' && !isMetaLoading && metaViewState === 'pending' && (
+                <div className="empty-feed">Meta directives are still being synthesized…</div>
+              )}
+              {commentViewMode === 'meta' && !isMetaLoading && metaViewState === 'missing' && (
+                <div className="empty-feed">
+                  No meta directives available for this run yet. Recompute to synthesize now.
+                </div>
+              )}
+              {commentViewMode === 'meta' && !isMetaLoading && metaViewState === 'error' && (
+                <div className="empty-feed">Unable to load meta directives right now.</div>
               )}
               {commentViewMode === 'meta' &&
                 !isMetaLoading &&
+                metaViewState === 'ready' &&
                 filteredMetaComments.length === 0 && (
                   <div className="empty-feed">No significant issues found.</div>
                 )}
               {commentViewMode === 'meta' &&
                 !isMetaLoading &&
+                metaViewState === 'ready' &&
                 filteredMetaComments.map((metaComment, index) => {
                   const topSource = metaComment.sources[0];
                   const pseudoColor = colorForPriority(metaComment.priority);
@@ -5000,6 +5085,24 @@ function colorForPriority(priority: 'critical' | 'high' | 'medium' | 'low' | str
   if (priority === 'high') return '#c57a1b';
   if (priority === 'medium') return '#2d6eea';
   return '#1d8a7a';
+}
+
+function isMetaSynthesisPendingStatus(status: string | null | undefined): boolean {
+  if (!status) return false;
+  const normalized = status.trim().toLowerCase();
+  return (
+    normalized === 'queued' ||
+    normalized === 'running' ||
+    normalized === 'pending' ||
+    normalized === 'in_progress' ||
+    normalized === 'processing'
+  );
+}
+
+function isMetaSynthesisFailedStatus(status: string | null | undefined): boolean {
+  if (!status) return false;
+  const normalized = status.trim().toLowerCase();
+  return normalized === 'failed' || normalized === 'error';
 }
 
 function buildCommentSignature(comments: CommentRead[]): string {
