@@ -1,0 +1,157 @@
+name: Bug
+description: Report a defect with reproducible steps and evidence-driven acceptance criteria.
+title: "[M?][area] Bug: "
+labels:
+  - type:bug
+  - prio:p1
+  - state:needs-info
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for defects/regressions.
+        **Ready for implementation requires complete acceptance criteria and validation commands.**
+
+  - type: dropdown
+    id: milestone_hint
+    attributes:
+      label: Milestone hint
+      description: Select the likely milestone for fixing this bug.
+      options:
+        - M1 Meta-first UX + synthesis orchestration
+        - M2 Persona contract reliability
+        - M3 Platform hardening
+        - M4 Delivery throughput + API-boundary maturity
+        - Unplanned / triage required
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area_hint
+    attributes:
+      label: Area hint
+      description: Choose the most relevant delivery area label.
+      options:
+        - area:backend
+        - area:frontend
+        - area:review-engine
+        - area:meta-critic
+        - area:auth
+        - area:security
+        - area:infra
+        - area:ci
+        - area:docs
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem_statement
+    attributes:
+      label: Problem statement
+      description: Summarize the bug and its user/system impact.
+      placeholder: |
+        What is broken:
+        Who/what is impacted:
+        Frequency/severity:
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed_behavior
+    attributes:
+      label: Observed behavior
+      description: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior
+      description: What should happen instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction_steps
+    attributes:
+      label: Reproduction steps
+      description: Deterministic steps to reproduce.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope_boundaries
+    attributes:
+      label: Scope boundaries
+      description: Define the intended fix scope.
+      placeholder: |
+        In scope:
+        -
+        -
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Explicit non-goals
+      description: Define what this fix will not cover.
+      placeholder: |
+        Out of scope / non-goals:
+        -
+        -
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: Required. Use checklist format and keep criteria testable.
+      placeholder: |
+        - [ ] Repro no longer fails in covered scenario(s)
+        - [ ] Regression test(s) added/updated
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation_commands
+    attributes:
+      label: Validation commands
+      description: Required. Commands reviewers can run to verify the fix.
+      placeholder: |
+        # Example
+        cd backend
+        uv run pytest backend/tests/path/to/regression_test.py -q
+    validations:
+      required: true
+
+  - type: textarea
+    id: risk_notes
+    attributes:
+      label: Risk notes
+      description: Describe rollout/regression/security risks and mitigations.
+      placeholder: |
+        Risk level (low/medium/high):
+        Risks:
+        Mitigations:
+    validations:
+      required: true
+
+  - type: textarea
+    id: docs_impact
+    attributes:
+      label: Docs impact
+      description: Required. What docs must be updated (or why none are needed)?
+      placeholder: |
+        Docs to update:
+        - docs/...
+        If none, explain why.
+    validations:
+      required: true
