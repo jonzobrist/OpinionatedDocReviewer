@@ -181,6 +181,64 @@ def test_meta_review_create_and_cache(client, monkeypatch) -> None:
     assert latest_resp.json()["id"] == body["id"]
 
 
+def test_latest_meta_review_supports_lightweight_mode_without_comments(client, monkeypatch) -> None:
+    headers = {"X-Tenant-Id": "tenant-meta-latest-lightweight"}
+    version, job = _seed_review_data(client, headers, monkeypatch)
+
+    monkeypatch.setattr(
+        "app.reviews.meta_reviewer.generate_completion",
+        lambda _: json.dumps(
+            [
+                {
+                    "content": "Clarify auth flow and explicit token lifecycle.",
+                    "category": "security",
+                    "priority": "high",
+                    "impact": "high",
+                    "effort": "low",
+                    "confidence": 0.88,
+                    "why_now": "Current wording could cause insecure implementations.",
+                    "recommended_change": "Define validation and token expiry behavior.",
+                    "verification_step": "Confirm security review comments converge to one directive.",
+                    "status": "open",
+                    "assignee": None,
+                    "due_at": None,
+                    "contributing_reviewers": ["A", "B"],
+                    "location": {"start_offset": 0, "end_offset": 28},
+                }
+            ]
+        ),
+    )
+
+    created_resp = client.post(
+        "/api/meta-reviews",
+        json={"document_version_id": version["id"], "review_job_id": job["id"], "force": True},
+        headers=headers,
+    )
+    assert created_resp.status_code == 201
+
+    full_latest_resp = client.get(
+        f"/api/meta-reviews/latest?document_version_id={version['id']}&review_job_id={job['id']}",
+        headers=headers,
+    )
+    assert full_latest_resp.status_code == 200
+    full_latest = full_latest_resp.json()
+    assert len(full_latest["comments"]) >= 1
+
+    lightweight_resp = client.get(
+        f"/api/meta-reviews/latest?document_version_id={version['id']}&review_job_id={job['id']}&include_comments=false",
+        headers=headers,
+    )
+    assert lightweight_resp.status_code == 200
+    lightweight = lightweight_resp.json()
+    assert lightweight["id"] == full_latest["id"]
+    assert lightweight["status"] == full_latest["status"]
+    assert lightweight["queued_at"] == full_latest["queued_at"]
+    assert lightweight["running_at"] == full_latest["running_at"]
+    assert lightweight["completed_at"] == full_latest["completed_at"]
+    assert lightweight["failed_at"] == full_latest["failed_at"]
+    assert lightweight["comments"] == []
+
+
 def test_latest_meta_review_prefers_newest_review_context_over_stale_created_later(
     client,
     monkeypatch,
@@ -260,6 +318,16 @@ def test_latest_meta_review_prefers_newest_review_context_over_stale_created_lat
     latest = latest_resp.json()
     assert latest["review_job_id"] == newer_job["id"]
     assert latest["id"] == newer_run["id"]
+
+    lightweight_resp = client.get(
+        f"/api/meta-reviews/latest?document_version_id={version['id']}&include_comments=false",
+        headers=headers,
+    )
+    assert lightweight_resp.status_code == 200
+    lightweight = lightweight_resp.json()
+    assert lightweight["review_job_id"] == newer_job["id"]
+    assert lightweight["id"] == newer_run["id"]
+    assert lightweight["comments"] == []
 
 
 def test_latest_meta_review_prefers_review_context_over_newer_unscoped_run(client, monkeypatch) -> None:
