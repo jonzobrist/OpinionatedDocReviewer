@@ -1,0 +1,33 @@
+# OpinionatedDocReviewer CODEOWNERS
+# TEMPORARY: All paths are assigned to @jonzobrist so CODEOWNER enforcement is effective immediately.
+# TODO: Split ownership by area/team once long-term owner mapping is finalized.
+# TODO: Keep ownership aligned with active maintainers and team structure.
+
+# Default fallback owner for unowned paths
+* @jonzobrist
+
+# Backend
+/backend/ @jonzobrist
+/backend/app/reviews/ @jonzobrist
+/backend/app/reviews/meta_reviewer.py @jonzobrist
+/backend/app/auth/ @jonzobrist
+/backend/app/security/ @jonzobrist
+
+# Frontend
+/frontend/ @jonzobrist
+
+# Infrastructure / operations
+/scripts/ @jonzobrist
+/backend/app/db/ @jonzobrist
+
+# CI and governance
+/.github/workflows/ @jonzobrist
+/.github/labeler.yml @jonzobrist
+/.github/CODEOWNERS @jonzobrist
+
+# Documentation
+/docs/ @jonzobrist
+/README.md @jonzobrist
+/PRODUCT.md @jonzobrist
+/THEORY.MD @jonzobrist
+/SECURITY_AUDIT.md @jonzobrist

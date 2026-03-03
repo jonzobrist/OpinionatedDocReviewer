@@ -1,0 +1,7 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Private security disclosure (preferred)
+    url: https://github.com/REPLACE_WITH_OWNER/OpinionatedDocReviewer/security/advisories/new
+    about: >-
+      Report sensitive vulnerabilities privately. TODO: replace REPLACE_WITH_OWNER
+      with the actual GitHub org/user for this repository.

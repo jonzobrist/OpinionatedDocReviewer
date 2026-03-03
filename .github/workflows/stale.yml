@@ -1,0 +1,41 @@
+name: Stale Triage
+
+on:
+  schedule:
+    - cron: "30 10 * * 1"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark and close stale issues/PRs
+        uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          days-before-issue-stale: 60
+          days-before-issue-close: 21
+          days-before-pr-stale: 45
+          days-before-pr-close: 30
+          stale-issue-label: "state:needs-info"
+          stale-pr-label: "state:needs-info"
+          exempt-issue-labels: "type:security,area:security,state:blocked,prio:p0"
+          exempt-pr-labels: "type:security,area:security,state:blocked,prio:p0"
+          stale-issue-message: >-
+            This issue has had no activity for 60 days and is being marked stale.
+            Add an update or remove stale conditions to keep it open.
+          close-issue-message: >-
+            Closing as stale after 21 additional days of inactivity.
+            Reopen with updated scope, acceptance criteria, and validation commands if still relevant.
+          stale-pr-message: >-
+            This PR has had no activity for 45 days and is being marked stale.
+            Please update/rebase and add status notes to keep it open.
+          close-pr-message: >-
+            Closing as stale after 30 additional days of inactivity.
+            Reopen when ready with fresh CI/test evidence.
+          remove-stale-when-updated: true
+          operations-per-run: 200
