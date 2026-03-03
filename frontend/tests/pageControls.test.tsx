@@ -629,6 +629,58 @@ describe('page controls', () => {
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
   });
 
+  it('recompute retries meta synthesis from failed state and keeps meta mode active', async () => {
+    metaLatestScenario = 'failed';
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams('doc=101');
+    render(<HomePage />);
+
+    expect(await screen.findByText('Unable to load meta directives right now.')).toBeTruthy();
+    const recompute = await screen.findByRole('button', { name: 'Recompute' });
+    fireEvent.click(recompute);
+
+    expect(await screen.findByText('No meta directives produced for this version.')).toBeTruthy();
+    expect(await screen.findByText('No significant issues found.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+
+    const postCall = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .slice()
+      .reverse()
+      .find((args) => String(args[0]).endsWith('/meta-reviews') && args[1]?.method === 'POST');
+    expect(postCall).toBeTruthy();
+    const body = JSON.parse(String(postCall?.[1]?.body ?? '{}'));
+    expect(body).toMatchObject({
+      document_version_id: 401,
+      review_job_id: 501,
+      force: true
+    });
+  });
+
+  it('recompute from missing meta run after manual toggle does not regress to individual mode', async () => {
+    metaLatestScenario = 'missing';
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams('doc=101');
+    render(<HomePage />);
+
+    expect(
+      await screen.findByText('Anchored reviewer comments for this document version.')
+    ).toBeTruthy();
+    expect(
+      await screen.findByText('No meta directives found for this run yet. Showing individual reviewer comments.')
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Meta' }));
+    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(
+      await screen.findAllByText('No meta directives available for this run yet. Recompute to synthesize now.')
+    ).toHaveLength(2);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Recompute' }));
+    expect(await screen.findByText('No meta directives produced for this version.')).toBeTruthy();
+    expect(await screen.findByText('No significant issues found.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+  });
+
   it('falls back to individual mode when meta is missing, while preserving manual mode toggle', async () => {
     metaLatestScenario = 'missing';
     mockPathname = '/';
