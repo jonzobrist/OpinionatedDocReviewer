@@ -52,6 +52,7 @@ import {
 } from '../src/lib/types';
 
 const POLL_INTERVAL_MS = 1200;
+const META_STATUS_POLL_MAX_ATTEMPTS = 8;
 const AGENT_COLORS = ['#1d8a7a', '#2d6eea', '#b7482f', '#7a4bd3', '#c57a1b', '#0f6e88'];
 
 type DocSegment = { text: string; comment?: CommentRead };
@@ -189,6 +190,7 @@ function HomePageContent() {
   const [metaReviewRun, setMetaReviewRun] = useState<MetaReviewRunRead | null>(null);
   const [metaViewState, setMetaViewState] = useState<MetaViewState>('idle');
   const [isMetaLoading, setIsMetaLoading] = useState(false);
+  const [isPageVisible, setIsPageVisible] = useState(true);
   const [metaCategoryFilter, setMetaCategoryFilter] = useState<
     'all' | 'structure' | 'clarity' | 'technical' | 'security' | 'accessibility' | 'style'
   >('all');
@@ -371,6 +373,123 @@ function HomePageContent() {
   ]);
 
   useEffect(() => {
+    if (normalizedPath !== '/') return;
+    if (commentViewMode !== 'meta') return;
+    if (!selectedVersionId) return;
+    if (metaViewState !== 'pending') return;
+    if (!isPageVisible) return;
+
+    let cancelled = false;
+    let attempts = 0;
+    let timeout: number | null = null;
+
+    const clearTimer = () => {
+      if (timeout !== null) {
+        window.clearTimeout(timeout);
+        timeout = null;
+      }
+    };
+
+    const scheduleNextPoll = () => {
+      if (cancelled) return;
+      if (attempts >= META_STATUS_POLL_MAX_ATTEMPTS) {
+        setStatusMessage(
+          'Meta directives are still being synthesized. Auto-refresh paused to avoid noisy polling.'
+        );
+        return;
+      }
+      timeout = window.setTimeout(() => {
+        void pollMetaStatus();
+      }, metaStatusPollDelayForAttempt(attempts + 1));
+    };
+
+    const pollMetaStatus = async () => {
+      clearTimer();
+      if (cancelled) return;
+      attempts += 1;
+      try {
+        const statusOnly = await fetchLatestMetaReviewRun(selectedVersionId, selectedReviewJobId, {
+          includeComments: false
+        });
+        if (cancelled) return;
+
+        setMetaReviewRun((previous) => {
+          if (
+            statusOnly.comments.length === 0 &&
+            previous &&
+            previous.id === statusOnly.id &&
+            previous.comments.length > 0
+          ) {
+            return { ...statusOnly, comments: previous.comments };
+          }
+          return statusOnly;
+        });
+
+        if (isMetaSynthesisPendingStatus(statusOnly.status)) {
+          scheduleNextPoll();
+          return;
+        }
+
+        if (isMetaSynthesisFailedStatus(statusOnly.status)) {
+          setMetaViewState('error');
+          setStatusMessage(
+            statusOnly.error_message
+              ? `Meta synthesis failed: ${statusOnly.error_message}`
+              : 'Meta synthesis failed. Recompute to retry.'
+          );
+          return;
+        }
+
+        const hydrated = await fetchLatestMetaReviewRun(selectedVersionId, selectedReviewJobId, {
+          includeComments: true
+        });
+        if (cancelled) return;
+
+        setMetaReviewRun(hydrated);
+        if (isMetaSynthesisPendingStatus(hydrated.status)) {
+          setMetaViewState('pending');
+          setStatusMessage('Meta directives are still being synthesized.');
+          scheduleNextPoll();
+          return;
+        }
+
+        if (isMetaSynthesisFailedStatus(hydrated.status)) {
+          setMetaViewState('error');
+          setStatusMessage(
+            hydrated.error_message
+              ? `Meta synthesis failed: ${hydrated.error_message}`
+              : 'Meta synthesis failed. Recompute to retry.'
+          );
+          return;
+        }
+
+        setMetaViewState('ready');
+        setStatusMessage(
+          hydrated.comments.length > 0
+            ? `Meta review loaded (${hydrated.comments.length} directives).`
+            : 'Meta review loaded (no directives).'
+        );
+      } catch {
+        if (cancelled) return;
+        scheduleNextPoll();
+      }
+    };
+
+    scheduleNextPoll();
+    return () => {
+      cancelled = true;
+      clearTimer();
+    };
+  }, [
+    normalizedPath,
+    commentViewMode,
+    selectedVersionId,
+    selectedReviewJobId,
+    metaViewState,
+    isPageVisible
+  ]);
+
+  useEffect(() => {
     if (!focusedCommentId) return;
     const card = cardRefs.current[focusedCommentId];
     const mark = markRefs.current[focusedCommentId];
@@ -451,6 +570,18 @@ function HomePageContent() {
     }, 4500);
     return () => window.clearTimeout(timer);
   }, [statusMessage]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const syncVisibility = () => {
+      setIsPageVisible(document.visibilityState !== 'hidden');
+    };
+    syncVisibility();
+    document.addEventListener('visibilitychange', syncVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', syncVisibility);
+    };
+  }, []);
 
   useEffect(() => {
     const previous = document.body.style.overflow;
@@ -721,6 +852,23 @@ function HomePageContent() {
     }
   }
 
+  async function fetchLatestMetaReviewRun(
+    versionId: number,
+    reviewJobId?: number | null,
+    options?: {
+      includeComments?: boolean;
+    }
+  ): Promise<MetaReviewRunRead> {
+    const params = new URLSearchParams({ document_version_id: String(versionId) });
+    if (reviewJobId) {
+      params.set('review_job_id', String(reviewJobId));
+    }
+    if (options?.includeComments === false) {
+      params.set('include_comments', 'false');
+    }
+    return apiFetch<MetaReviewRunRead>(`/meta-reviews/latest?${params.toString()}`);
+  }
+
   async function loadOrCreateMetaReview(
     versionId: number,
     reviewJobId?: number | null,
@@ -734,11 +882,10 @@ function HomePageContent() {
     setMetaViewState('loading');
     try {
       if (!force) {
-        const query = reviewJobId
-          ? `/meta-reviews/latest?document_version_id=${versionId}&review_job_id=${reviewJobId}`
-          : `/meta-reviews/latest?document_version_id=${versionId}`;
         try {
-          const latest = await apiFetch<MetaReviewRunRead>(query);
+          const latest = await fetchLatestMetaReviewRun(versionId, reviewJobId, {
+            includeComments: true
+          });
           setMetaReviewRun(latest);
           if (isMetaSynthesisPendingStatus(latest.status)) {
             setMetaViewState('pending');
@@ -5261,6 +5408,11 @@ function isMetaSynthesisFailedStatus(status: string | null | undefined): boolean
   if (!status) return false;
   const normalized = status.trim().toLowerCase();
   return normalized === 'failed' || normalized === 'error';
+}
+
+function metaStatusPollDelayForAttempt(attempt: number): number {
+  const normalizedAttempt = Math.max(1, attempt);
+  return Math.min(40 * 2 ** (normalizedAttempt - 1), 320);
 }
 
 function parseCommentViewModeParam(value: string | null): 'individual' | 'meta' | null {
