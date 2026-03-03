@@ -6,14 +6,29 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 
 let mockPathname = '/';
 let mockSearchParams = new URLSearchParams();
+let metaLatestScenario: 'missing' | 'available' | 'pending' | 'failed' = 'missing';
+
+function applyMockRoute(next: string) {
+  const parsed = new URL(next, 'http://localhost');
+  mockPathname = parsed.pathname;
+  mockSearchParams = new URLSearchParams(parsed.search);
+}
+
 const pushMock = vi.fn((next: string) => {
-  mockPathname = next;
+  applyMockRoute(next);
+});
+const replaceMock = vi.fn((next: string) => {
+  applyMockRoute(next);
 });
 
 vi.mock('next/navigation', () => ({
   usePathname: () => mockPathname,
-  useRouter: () => ({ push: pushMock, replace: vi.fn() }),
-  useSearchParams: () => ({ get: (key: string) => mockSearchParams.get(key) })
+  useRouter: () => ({ push: pushMock, replace: replaceMock }),
+  useSearchParams: () => ({
+    get: (key: string) => mockSearchParams.get(key),
+    has: (key: string) => mockSearchParams.has(key),
+    toString: () => mockSearchParams.toString()
+  })
 }));
 
 import HomePage from '../app/page';
@@ -29,7 +44,9 @@ describe('page controls', () => {
   beforeEach(() => {
     mockPathname = '/';
     mockSearchParams = new URLSearchParams();
+    metaLatestScenario = 'missing';
     pushMock.mockClear();
+    replaceMock.mockClear();
     const store = new Map<string, string>();
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
@@ -183,6 +200,107 @@ describe('page controls', () => {
             created_at: new Date().toISOString()
           }
         ]);
+      }
+      if (url.includes('/meta-reviews/latest?')) {
+        const targetsPrimaryVersion = url.includes('document_version_id=401');
+        if (targetsPrimaryVersion && metaLatestScenario === 'available') {
+          return json({
+            id: 901,
+            tenant_id: 'local-dev',
+            document_version_id: 401,
+            review_job_id: 501,
+            input_hash: 'meta-hash',
+            status: 'completed',
+            is_synthesized: true,
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            error_message: null,
+            created_at: new Date().toISOString(),
+            comments: [
+              {
+                id: 9501,
+                content: 'Clarify the opening section to reduce ambiguity.',
+                category: 'clarity',
+                priority: 'high',
+                impact: 'high',
+                effort: 'low',
+                confidence: 0.88,
+                why_now: 'Readers may misinterpret scope.',
+                recommended_change: 'Add a one-sentence framing statement.',
+                verification_step: 'Re-run clarity reviewer and confirm no repeat issue.',
+                status: 'open',
+                assignee: null,
+                due_at: null,
+                rank_score: 8.4,
+                start_offset: 0,
+                end_offset: 10,
+                order_index: 0,
+                is_unsynthesized: false,
+                sources: [
+                  {
+                    id: 9701,
+                    comment_id: 601,
+                    reviewer_name: 'Clarity Editor',
+                    reviewer_id: 1,
+                    original_comment_text: 'Clarify this section.'
+                  }
+                ]
+              }
+            ]
+          });
+        }
+        if (targetsPrimaryVersion && metaLatestScenario === 'pending') {
+          return json({
+            id: 902,
+            tenant_id: 'local-dev',
+            document_version_id: 401,
+            review_job_id: 501,
+            input_hash: 'meta-pending',
+            status: 'running',
+            is_synthesized: false,
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            error_message: null,
+            created_at: new Date().toISOString(),
+            comments: []
+          });
+        }
+        if (targetsPrimaryVersion && metaLatestScenario === 'failed') {
+          return json({
+            id: 904,
+            tenant_id: 'local-dev',
+            document_version_id: 401,
+            review_job_id: 501,
+            input_hash: 'meta-failed',
+            status: 'failed',
+            is_synthesized: false,
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            error_message: 'Provider timeout',
+            created_at: new Date().toISOString(),
+            comments: []
+          });
+        }
+        return json({ detail: 'Meta review run not found' }, 404);
+      }
+      if (url.endsWith('/meta-reviews') && init?.method === 'POST') {
+        return json(
+          {
+            id: 903,
+            tenant_id: 'local-dev',
+            document_version_id: 401,
+            review_job_id: 501,
+            input_hash: 'meta-created',
+            status: 'completed',
+            is_synthesized: true,
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            error_message: null,
+            created_at: new Date().toISOString(),
+            comments: []
+          },
+          201
+        );
       }
       if (url.endsWith('/personas') && (!init || init.method === 'GET')) return json(personasPayload);
       if (url.endsWith('/personas') && init?.method === 'POST') {
@@ -474,6 +592,68 @@ describe('page controls', () => {
     render(<HomePage />);
     const brand = await screen.findByRole('link', { name: /opinionated doc reviewer/i });
     expect(brand.getAttribute('href')).toBe('/library');
+  });
+
+  it('defaults to meta mode when latest meta directives are available', async () => {
+    metaLatestScenario = 'available';
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams('doc=101');
+    render(<HomePage />);
+
+    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Clarify the opening section to reduce ambiguity.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+  });
+
+  it('keeps meta mode and shows explicit error state when latest meta synthesis failed', async () => {
+    metaLatestScenario = 'failed';
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams('doc=101');
+    render(<HomePage />);
+
+    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Unable to load meta directives right now.')).toBeTruthy();
+    expect(await screen.findByText('Meta synthesis failed: Provider timeout')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+  });
+
+  it('shows explicit pending state while meta synthesis is still running', async () => {
+    metaLatestScenario = 'pending';
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams('doc=101');
+    render(<HomePage />);
+
+    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Meta directives are still being synthesized…')).toBeTruthy();
+    expect(await screen.findByText('Meta directives are still being synthesized.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+  });
+
+  it('falls back to individual mode when meta is missing, while preserving manual mode toggle', async () => {
+    metaLatestScenario = 'missing';
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams('doc=101');
+    render(<HomePage />);
+
+    expect(
+      await screen.findByText('Anchored reviewer comments for this document version.')
+    ).toBeTruthy();
+    expect(
+      await screen.findByText('No meta directives found for this run yet. Showing individual reviewer comments.')
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Meta' }));
+    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(
+      (
+        await screen.findAllByText(
+          'No meta directives available for this run yet. Recompute to synthesize now.'
+        )
+      ).length
+    ).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Individual' }));
+    expect(await screen.findByRole('button', { name: 'Refresh' })).toBeTruthy();
   });
 
   it('refresh falls back to latest available comments when selected run is empty', async () => {
