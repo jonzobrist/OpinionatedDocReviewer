@@ -262,6 +262,92 @@ def test_latest_meta_review_prefers_newest_review_context_over_stale_created_lat
     assert latest["id"] == newer_run["id"]
 
 
+def test_latest_meta_review_prefers_review_context_over_newer_unscoped_run(client, monkeypatch) -> None:
+    headers = {"X-Tenant-Id": "tenant-meta-latest-unscoped"}
+    version, older_job = _seed_review_data(client, headers, monkeypatch)
+
+    personas_resp = client.get("/api/personas", headers=headers)
+    assert personas_resp.status_code == 200
+    personas = {item["name"]: item for item in personas_resp.json()}
+
+    newer_job_resp = client.post(
+        "/api/review-jobs",
+        json={"document_version_id": version["id"], "trigger": "manual"},
+        headers=headers,
+    )
+    assert newer_job_resp.status_code == 201
+    newer_job = newer_job_resp.json()
+
+    _add_comments_for_job(
+        client,
+        headers,
+        document_version_id=version["id"],
+        review_job_id=newer_job["id"],
+        persona_id_a=personas["A"]["id"],
+        persona_id_b=personas["B"]["id"],
+    )
+
+    monkeypatch.setattr(
+        "app.reviews.meta_reviewer.generate_completion",
+        lambda _: json.dumps(
+            [
+                {
+                    "content": "Use explicit token validation checks.",
+                    "category": "security",
+                    "priority": "high",
+                    "impact": "high",
+                    "effort": "low",
+                    "confidence": 0.92,
+                    "why_now": "Latest review context surfaced unresolved ambiguity.",
+                    "recommended_change": "Add validation, expiry, and fallback behavior.",
+                    "verification_step": "Re-run reviewers and confirm security concerns are closed.",
+                    "status": "open",
+                    "assignee": None,
+                    "due_at": None,
+                    "contributing_reviewers": ["A", "B"],
+                    "location": {"start_offset": 0, "end_offset": 30},
+                }
+            ]
+        ),
+    )
+
+    latest_context_resp = client.post(
+        "/api/meta-reviews",
+        json={"document_version_id": version["id"], "review_job_id": newer_job["id"], "force": True},
+        headers=headers,
+    )
+    assert latest_context_resp.status_code == 201
+    latest_context_run = latest_context_resp.json()
+
+    no_comment_job_resp = client.post(
+        "/api/review-jobs",
+        json={"document_version_id": version["id"], "trigger": "manual"},
+        headers=headers,
+    )
+    assert no_comment_job_resp.status_code == 201
+    no_comment_job = no_comment_job_resp.json()
+
+    unscoped_resp = client.post(
+        "/api/meta-reviews",
+        json={"document_version_id": version["id"], "review_job_id": no_comment_job["id"], "force": True},
+        headers=headers,
+    )
+    assert unscoped_resp.status_code == 201
+    unscoped_run = unscoped_resp.json()
+    assert unscoped_run["review_job_id"] is None
+    assert unscoped_run["id"] != latest_context_run["id"]
+
+    latest_resp = client.get(
+        f"/api/meta-reviews/latest?document_version_id={version['id']}",
+        headers=headers,
+    )
+    assert latest_resp.status_code == 200
+    latest = latest_resp.json()
+    assert latest["review_job_id"] == newer_job["id"]
+    assert latest["id"] == latest_context_run["id"]
+
+
+
 def test_latest_meta_review_for_same_context_uses_created_order_tiebreak(client, monkeypatch) -> None:
     headers = {"X-Tenant-Id": "tenant-meta-latest-tiebreak"}
     version, job = _seed_review_data(client, headers, monkeypatch)
@@ -381,6 +467,85 @@ def test_meta_review_ensure_endpoint_is_idempotent_with_resolution(client, monke
     forced = forced_resp.json()
     assert forced["resolution"] == "created"
     assert forced["id"] != first["id"]
+
+
+def test_meta_review_ensure_creates_new_run_when_source_input_changes(client, monkeypatch) -> None:
+    headers = {"X-Tenant-Id": "tenant-meta-ensure-input-change"}
+    version, job = _seed_review_data(client, headers, monkeypatch)
+
+    monkeypatch.setattr(
+        "app.reviews.meta_reviewer.generate_completion",
+        lambda _: json.dumps(
+            [
+                {
+                    "content": "Clarify auth flow and explicit token lifecycle.",
+                    "category": "security",
+                    "priority": "high",
+                    "impact": "high",
+                    "effort": "low",
+                    "confidence": 0.88,
+                    "why_now": "Current wording could cause insecure implementations.",
+                    "recommended_change": "Define validation and token expiry behavior.",
+                    "verification_step": "Confirm security review comments converge to one directive.",
+                    "status": "open",
+                    "assignee": None,
+                    "due_at": None,
+                    "contributing_reviewers": ["A", "B"],
+                    "location": {"start_offset": 0, "end_offset": 28},
+                }
+            ]
+        ),
+    )
+
+    initial_resp = client.post(
+        "/api/meta-reviews/ensure",
+        json={"document_version_id": version["id"], "review_job_id": job["id"]},
+        headers=headers,
+    )
+    assert initial_resp.status_code == 200
+    initial = initial_resp.json()
+    assert initial["resolution"] == "created"
+
+    personas_resp = client.get("/api/personas", headers=headers)
+    assert personas_resp.status_code == 200
+    personas = {item["name"]: item for item in personas_resp.json()}
+    assert "A" in personas
+
+    added_comment_resp = client.post(
+        "/api/comments",
+        json={
+            "document_version_id": version["id"],
+            "review_job_id": job["id"],
+            "persona_id": personas["A"]["id"],
+            "text": "Add explicit rule precedence ordering.",
+            "start_offset": 2,
+            "end_offset": 16,
+            "excerpt": "pha beta gamma",
+        },
+        headers=headers,
+    )
+    assert added_comment_resp.status_code == 201
+
+    changed_resp = client.post(
+        "/api/meta-reviews/ensure",
+        json={"document_version_id": version["id"], "review_job_id": job["id"]},
+        headers=headers,
+    )
+    assert changed_resp.status_code == 200
+    changed = changed_resp.json()
+    assert changed["resolution"] == "created"
+    assert changed["id"] != initial["id"]
+    assert changed["input_hash"] != initial["input_hash"]
+
+    repeat_resp = client.post(
+        "/api/meta-reviews/ensure",
+        json={"document_version_id": version["id"], "review_job_id": job["id"]},
+        headers=headers,
+    )
+    assert repeat_resp.status_code == 200
+    repeat = repeat_resp.json()
+    assert repeat["resolution"] == "reused"
+    assert repeat["id"] == changed["id"]
 
 
 def test_meta_review_failed_run_exposes_safe_error_details(client, monkeypatch) -> None:
