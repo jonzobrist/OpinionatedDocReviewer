@@ -1,0 +1,66 @@
+'area:backend':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'backend/**'
+
+'area:frontend':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'frontend/**'
+
+'area:review-engine':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'backend/app/reviews/**'
+          - 'backend/app/api/review_jobs.py'
+          - 'backend/app/api/comments.py'
+          - 'backend/tests/**/*review*'
+
+'area:meta-critic':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'backend/app/reviews/meta_reviewer.py'
+          - 'backend/tests/**/*meta*'
+          - 'docs/**/*meta*'
+
+'area:auth':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'backend/app/auth/**'
+          - 'backend/app/api/auth*.py'
+          - 'backend/tests/**/*auth*'
+          - 'frontend/**/auth*/**'
+
+'area:security':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'backend/app/security/**'
+          - 'backend/tests/**/*security*'
+          - 'SECURITY_AUDIT.md'
+          - '.github/workflows/security-scan.yml'
+
+'area:infra':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'scripts/**'
+          - 'backend/app/db/**'
+          - 'backend/app/core/**'
+
+'area:ci':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/workflows/**'
+          - '.github/labeler.yml'
+          - '.github/CODEOWNERS'
+          - 'backend/pyproject.toml'
+          - 'frontend/package.json'
+          - 'frontend/bun.lock'
+
+'area:docs':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**'
+          - 'README.md'
+          - 'PRODUCT.md'
+          - 'BETA_READINESS.md'
+          - 'THEORY.MD'

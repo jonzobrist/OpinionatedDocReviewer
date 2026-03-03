@@ -1,0 +1,129 @@
+name: Ops
+description: Operational/platform work (CI, infra, reliability, observability, automation).
+title: "[M?][area] Ops: "
+labels:
+  - type:ops
+  - prio:p2
+  - state:needs-info
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for operational/platform tasks.
+        **Ready for implementation requires complete acceptance criteria and validation commands.**
+
+  - type: dropdown
+    id: milestone_hint
+    attributes:
+      label: Milestone hint
+      description: Select the likely milestone for this operational work.
+      options:
+        - M1 Meta-first UX + synthesis orchestration
+        - M2 Persona contract reliability
+        - M3 Platform hardening
+        - M4 Delivery throughput + API-boundary maturity
+        - Ongoing/platform maintenance
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area_hint
+    attributes:
+      label: Area hint
+      description: Choose the most relevant delivery area label.
+      options:
+        - area:backend
+        - area:frontend
+        - area:review-engine
+        - area:meta-critic
+        - area:auth
+        - area:security
+        - area:infra
+        - area:ci
+        - area:docs
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem_statement
+    attributes:
+      label: Problem statement
+      description: What operational pain/risk/cost are we addressing?
+      placeholder: |
+        Current pain/risk:
+        Impact (availability/cost/perf/dev velocity):
+        Why now:
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope_boundaries
+    attributes:
+      label: Scope boundaries
+      description: Define exactly what operational changes are in scope.
+      placeholder: |
+        In scope:
+        -
+        -
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Explicit non-goals
+      description: Define what this issue will not change.
+      placeholder: |
+        Out of scope / non-goals:
+        -
+        -
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: Required. Use checklist format and keep criteria testable.
+      placeholder: |
+        - [ ]
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation_commands
+    attributes:
+      label: Validation commands
+      description: Required. Commands/runbooks/evidence to verify operational success.
+      placeholder: |
+        # Example
+        # CI command(s), deployment checks, smoke tests, metrics query, etc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: risk_notes
+    attributes:
+      label: Risk notes
+      description: Required. Failure modes, rollback/safeguards, and mitigations.
+      placeholder: |
+        Risk level (low/medium/high):
+        Failure modes:
+        Mitigations/rollback:
+    validations:
+      required: true
+
+  - type: textarea
+    id: docs_impact
+    attributes:
+      label: Docs impact
+      description: Required. Which runbooks/docs need updates?
+      placeholder: |
+        Docs to update:
+        - docs/...
+        - scripts/... (if runbook references)
+        If none, explain why.
+    validations:
+      required: true
