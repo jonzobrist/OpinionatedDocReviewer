@@ -58,6 +58,30 @@ def _prepare_run_for_response(run: models.MetaReviewRun) -> models.MetaReviewRun
     return run
 
 
+def _build_run_metadata_payload(run: models.MetaReviewRun) -> dict:
+    normalize_meta_review_run_state(run)
+    return {
+        "id": run.id,
+        "tenant_id": run.tenant_id,
+        "document_version_id": run.document_version_id,
+        "review_job_id": run.review_job_id,
+        "input_hash": run.input_hash,
+        "status": run.status,
+        "queued_at": run.queued_at,
+        "running_at": run.running_at,
+        "completed_at": run.completed_at,
+        "failed_at": run.failed_at,
+        "is_synthesized": run.is_synthesized,
+        "provider": run.provider,
+        "model": run.model,
+        "error_code": run.error_code,
+        "error_message": run.error_message,
+        "error_details": run.error_details,
+        "created_at": run.created_at,
+        "comments": [],
+    }
+
+
 @router.post("", response_model=MetaReviewRunRead, status_code=201)
 def create_meta_review(
     payload: MetaReviewCreate,
@@ -128,19 +152,18 @@ def ensure_meta_review(
 def get_latest_meta_review(
     document_version_id: int = Query(gt=0),
     review_job_id: int | None = Query(default=None, gt=0),
+    include_comments: bool = Query(default=True),
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
-) -> models.MetaReviewRun:
-    query = (
-        db.query(models.MetaReviewRun)
-        .options(
+) -> models.MetaReviewRun | dict:
+    query = db.query(models.MetaReviewRun).filter(
+        models.MetaReviewRun.tenant_id == tenant_id,
+        models.MetaReviewRun.document_version_id == document_version_id,
+    )
+    if include_comments:
+        query = query.options(
             selectinload(models.MetaReviewRun.comments).selectinload(models.MetaComment.sources)
         )
-        .filter(
-            models.MetaReviewRun.tenant_id == tenant_id,
-            models.MetaReviewRun.document_version_id == document_version_id,
-        )
-    )
     if review_job_id is not None:
         query = query.filter(models.MetaReviewRun.review_job_id == review_job_id).order_by(
             models.MetaReviewRun.created_at.desc(),
@@ -157,4 +180,6 @@ def get_latest_meta_review(
     run = query.first()
     if not run:
         raise HTTPException(status_code=404, detail="Meta review run not found")
-    return _prepare_run_for_response(run)
+    if include_comments:
+        return _prepare_run_for_response(run)
+    return _build_run_metadata_payload(run)
