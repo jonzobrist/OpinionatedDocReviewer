@@ -5,9 +5,12 @@ from types import SimpleNamespace
 from app.db import models
 from app.db.init_db import seed_default_personas
 from app.db.session import SessionLocal
+from app.reviews.parsing import ParsedComment
+from app.reviews.prompt_builder import REQUIRED_PERSONA_EXECUTION_SPEC_FIELDS
 from app.reviews.worker import (
     _auto_trigger_meta_synthesis,
     _generate_with_timeout_retry,
+    retry_failed_persona_in_job,
     run_review_job,
 )
 
@@ -40,6 +43,129 @@ def _seed_review_context(db, tenant_id: str) -> tuple[models.DocumentVersion, mo
     db.refresh(job)
 
     return version, job
+
+
+def _assert_full_persona_contract(spec: dict) -> None:
+    assert set(REQUIRED_PERSONA_EXECUTION_SPEC_FIELDS).issubset(spec.keys())
+    assert spec["id"] is not None
+    assert isinstance(spec["name"], str)
+    assert isinstance(spec["focus_areas"], list)
+    assert isinstance(spec["output_requirements"], dict)
+    assert isinstance(spec["examples"], list)
+
+
+def test_run_review_job_uses_full_persona_contract_payload(monkeypatch) -> None:
+    db = SessionLocal()
+    try:
+        tenant_id = "tenant-test-persona-contract-run"
+        monkeypatch.setattr("app.reviews.worker.settings.DOC_REPO_ENABLED", False)
+        monkeypatch.setattr("app.reviews.worker.settings.META_AUTO_SYNTHESIS_ENABLED", False)
+
+        version, job = _seed_review_context(db, tenant_id)
+
+        captured_specs: list[dict] = []
+
+        def _capture_generate_comments_for_spec(persona, _content):
+            captured_specs.append(
+                {
+                    "id": persona.get("id"),
+                    "name": persona.get("name"),
+                    "description": persona.get("description"),
+                    "system_prompt": persona.get("system_prompt"),
+                    "focus_areas": list(persona.get("focus_areas") or []),
+                    "tone": persona.get("tone"),
+                    "reference_notes": persona.get("reference_notes"),
+                    "output_requirements": dict(persona.get("output_requirements") or {}),
+                    "examples": list(persona.get("examples") or []),
+                    "sort_order": persona.get("sort_order"),
+                }
+            )
+            return ['Review: clarify "world" term.']
+
+        monkeypatch.setattr(
+            "app.reviews.worker.generate_comments_for_spec",
+            _capture_generate_comments_for_spec,
+        )
+
+        run_review_job(job.id, tenant_id)
+
+        assert captured_specs
+        for spec in captured_specs:
+            _assert_full_persona_contract(spec)
+            assert spec["sort_order"] is not None
+    finally:
+        db.close()
+
+
+def test_retry_failed_persona_uses_full_persona_contract_payload(monkeypatch) -> None:
+    db = SessionLocal()
+    try:
+        tenant_id = "tenant-test-persona-contract-retry"
+        version, job = _seed_review_context(db, tenant_id)
+
+        persona = (
+            db.query(models.Persona)
+            .filter(models.Persona.tenant_id == tenant_id, models.Persona.is_active.is_(True))
+            .order_by(models.Persona.id.asc())
+            .first()
+        )
+        assert persona is not None
+
+        captured_specs: list[dict] = []
+
+        def _capture_generate_comments_for_spec(persona_spec, _content):
+            captured_specs.append(
+                {
+                    "id": persona_spec.get("id"),
+                    "name": persona_spec.get("name"),
+                    "description": persona_spec.get("description"),
+                    "system_prompt": persona_spec.get("system_prompt"),
+                    "focus_areas": list(persona_spec.get("focus_areas") or []),
+                    "tone": persona_spec.get("tone"),
+                    "reference_notes": persona_spec.get("reference_notes"),
+                    "output_requirements": dict(persona_spec.get("output_requirements") or {}),
+                    "examples": list(persona_spec.get("examples") or []),
+                    "sort_order": persona_spec.get("sort_order"),
+                }
+            )
+            return [
+                ParsedComment(
+                    text='Clarify "world" term.',
+                    output_metadata={},
+                )
+            ]
+
+        monkeypatch.setattr(
+            "app.reviews.worker.generate_comments_for_spec",
+            _capture_generate_comments_for_spec,
+        )
+
+        added = retry_failed_persona_in_job(job.id, tenant_id, persona.id)
+        assert added == 1
+        assert len(captured_specs) == 1
+
+        spec = captured_specs[0]
+        _assert_full_persona_contract(spec)
+        assert spec["id"] == persona.id
+        assert spec["name"] == persona.name
+        assert spec["sort_order"] == persona.sort_order
+        assert spec["reference_notes"] == persona.reference_notes
+        assert spec["output_requirements"] == (persona.output_requirements or {})
+        assert spec["examples"] == (persona.examples or [])
+
+        created_comments = (
+            db.query(models.Comment)
+            .filter(
+                models.Comment.tenant_id == tenant_id,
+                models.Comment.review_job_id == job.id,
+                models.Comment.persona_id == persona.id,
+            )
+            .all()
+        )
+        assert len(created_comments) >= 1
+        assert any('Clarify "world" term.' in comment.text for comment in created_comments)
+    finally:
+        db.close()
 
 
 def test_review_worker_generates_comments_and_auto_triggers_meta(monkeypatch) -> None:

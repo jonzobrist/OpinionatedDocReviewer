@@ -11,6 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout, as_completed
 from app.reviews.meta_reviewer import ensure_meta_review_run
 from app.reviews.parsing import parse_review_output, persist_comment_payloads, normalize_output_requirements, ParsedComment
+from app.reviews.prompt_builder import build_persona_execution_spec, build_persona_execution_specs
 from app.reviews.git_repo import ensure_repo
 from app.reviews.review_storage import write_review_and_commit
 from datetime import datetime, timezone
@@ -119,20 +120,7 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
                 .all()
             )
 
-        persona_specs = [
-            {
-                "id": persona.id,
-                "name": persona.name,
-                "description": persona.description,
-                "system_prompt": persona.system_prompt,
-                "focus_areas": persona.focus_areas,
-                "tone": persona.tone,
-                "reference_notes": persona.reference_notes,
-                "output_requirements": persona.output_requirements,
-                "examples": persona.examples,
-            }
-            for persona in personas
-        ]
+        persona_specs = build_persona_execution_specs(personas)
 
         results: list[dict] = []
         max_workers = max(1, min(len(persona_specs), 6))
@@ -248,20 +236,7 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
 
 
 def generate_comments(persona: models.Persona, content: str) -> list[ParsedComment]:
-    return generate_comments_for_spec(
-        {
-            "id": persona.id,
-            "name": persona.name,
-            "description": persona.description,
-            "system_prompt": persona.system_prompt,
-            "focus_areas": persona.focus_areas,
-            "tone": persona.tone,
-            "reference_notes": persona.reference_notes,
-            "output_requirements": persona.output_requirements,
-            "examples": persona.examples,
-        },
-        content,
-    )
+    return generate_comments_for_spec(build_persona_execution_spec(persona), content)
 
 
 def generate_comments_for_spec(persona: dict, content: str) -> list[ParsedComment]:
@@ -528,14 +503,7 @@ def retry_failed_persona_in_job(
         db.commit()
 
         comments = generate_comments_for_spec(
-            {
-                "id": persona.id,
-                "name": persona.name,
-                "description": persona.description,
-                "system_prompt": persona.system_prompt,
-                "focus_areas": persona.focus_areas,
-                "tone": persona.tone,
-            },
+            build_persona_execution_spec(persona),
             version.content,
         )
         persist_comments(
