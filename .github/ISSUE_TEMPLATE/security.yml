@@ -1,0 +1,146 @@
+name: Security
+description: Track a security issue with clear scope, validation, and risk handling.
+title: "[M?][security] Security: "
+labels:
+  - type:security
+  - area:security
+  - prio:p0
+  - state:needs-info
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for security defects/hardening.
+        **Do not include secrets, private keys, credentials, or exploit payloads in clear text.**
+        For sensitive vulnerabilities, prefer private advisory reporting.
+
+  - type: dropdown
+    id: milestone_hint
+    attributes:
+      label: Milestone hint
+      description: Select the likely milestone for remediation.
+      options:
+        - M1 Meta-first UX + synthesis orchestration
+        - M2 Persona contract reliability
+        - M3 Platform hardening
+        - M4 Delivery throughput + API-boundary maturity
+        - Immediate / outside milestone
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area_hint
+    attributes:
+      label: Area hint
+      description: Primary area impacted by this security work.
+      options:
+        - area:backend
+        - area:frontend
+        - area:review-engine
+        - area:meta-critic
+        - area:auth
+        - area:security
+        - area:infra
+        - area:ci
+        - area:docs
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity_hint
+    attributes:
+      label: Severity hint
+      options:
+        - critical
+        - high
+        - medium
+        - low
+        - unknown / needs triage
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem_statement
+    attributes:
+      label: Problem statement
+      description: Describe the vulnerability or security gap and impact.
+      placeholder: |
+        Vulnerability summary:
+        Affected components:
+        Potential impact:
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope_boundaries
+    attributes:
+      label: Scope boundaries
+      description: Define remediation scope and constraints.
+      placeholder: |
+        In scope:
+        -
+        -
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Explicit non-goals
+      description: Define what this issue will not address.
+      placeholder: |
+        Out of scope / non-goals:
+        -
+        -
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: Required. Use checklist format and keep criteria testable.
+      placeholder: |
+        - [ ] Vulnerability condition no longer reproducible
+        - [ ] Security test(s) added/updated
+        - [ ] Audit/logging/docs requirements satisfied
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation_commands
+    attributes:
+      label: Validation commands
+      description: Required. Commands/evidence used to verify remediation.
+      placeholder: |
+        # Example
+        cd backend
+        uv run pytest -q
+        # plus security scan command(s)
+    validations:
+      required: true
+
+  - type: textarea
+    id: risk_notes
+    attributes:
+      label: Risk notes
+      description: Required. Threat model notes, exploitability, and mitigations.
+      placeholder: |
+        Threat model summary:
+        Exploitability:
+        Mitigations/compensating controls:
+    validations:
+      required: true
+
+  - type: textarea
+    id: docs_impact
+    attributes:
+      label: Docs impact
+      description: Required. Security docs/runbooks/policies to update.
+      placeholder: |
+        Docs to update:
+        - SECURITY_AUDIT.md
+        - docs/...
+        If none, explain why.
+    validations:
+      required: true

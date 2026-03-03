@@ -1,0 +1,138 @@
+name: Spike
+description: Time-boxed research/prototyping to reduce uncertainty before implementation.
+title: "[M?][area] Spike: "
+labels:
+  - type:spike
+  - prio:p2
+  - state:needs-info
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for research spikes and architecture investigations.
+        **Ready for execution requires clear deliverables, acceptance criteria, and validation commands.**
+
+  - type: dropdown
+    id: milestone_hint
+    attributes:
+      label: Milestone hint
+      description: Select the milestone the spike primarily supports.
+      options:
+        - M1 Meta-first UX + synthesis orchestration
+        - M2 Persona contract reliability
+        - M3 Platform hardening
+        - M4 Delivery throughput + API-boundary maturity
+        - Cross-milestone / exploratory
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area_hint
+    attributes:
+      label: Area hint
+      description: Choose the most relevant delivery area label.
+      options:
+        - area:backend
+        - area:frontend
+        - area:review-engine
+        - area:meta-critic
+        - area:auth
+        - area:security
+        - area:infra
+        - area:ci
+        - area:docs
+    validations:
+      required: true
+
+  - type: input
+    id: timebox
+    attributes:
+      label: Timebox
+      description: Planned effort budget (e.g., 1 day, 3 days).
+      placeholder: 1-3 days
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem_statement
+    attributes:
+      label: Problem statement
+      description: What uncertainty/risk is this spike resolving?
+      placeholder: |
+        Unknowns:
+        Decision(s) needed:
+        Why this blocks/affects delivery:
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope_boundaries
+    attributes:
+      label: Scope boundaries
+      description: Define what investigation/prototyping is in scope.
+      placeholder: |
+        In scope:
+        -
+        -
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Explicit non-goals
+      description: Define what this spike will not deliver.
+      placeholder: |
+        Out of scope / non-goals:
+        -
+        -
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: Required. Use checklist format with concrete outputs.
+      placeholder: |
+        - [ ] Decision record produced
+        - [ ] Options compared with pros/cons
+        - [ ] Recommended next step captured
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation_commands
+    attributes:
+      label: Validation commands
+      description: Required. Commands/artifacts proving spike outcomes.
+      placeholder: |
+        # Example
+        # commands run for prototype or analysis
+        # include artifact paths (docs/, benchmark output, etc.)
+    validations:
+      required: true
+
+  - type: textarea
+    id: risk_notes
+    attributes:
+      label: Risk notes
+      description: Required. Risks discovered and mitigation options.
+      placeholder: |
+        Risks discovered:
+        Confidence level:
+        Mitigation options:
+    validations:
+      required: true
+
+  - type: textarea
+    id: docs_impact
+    attributes:
+      label: Docs impact
+      description: Required. Docs/decision logs to create or update.
+      placeholder: |
+        Docs to update:
+        - docs/...
+        If none, explain why.
+    validations:
+      required: true
