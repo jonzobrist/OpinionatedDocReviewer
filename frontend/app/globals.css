@@ -708,10 +708,25 @@ main {
   padding: 8px;
 }
 
+.meta-source-item.selected {
+  border-color: rgba(45, 110, 234, 0.42);
+  box-shadow: 0 0 0 1px rgba(45, 110, 234, 0.25);
+}
+
 .meta-source-head {
   font-weight: 700;
   margin-bottom: 4px;
   color: var(--ink-700);
+}
+
+.meta-source-excerpt {
+  margin-top: 6px;
+  color: var(--ink-500);
+  font-size: 12px;
+}
+
+.source-jump-button {
+  margin-top: 8px;
 }
 
 .empty-feed {

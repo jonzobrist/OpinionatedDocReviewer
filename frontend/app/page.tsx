@@ -44,6 +44,7 @@ import {
   DocumentVersionRead,
   PersonaRead,
   ReviewJobRead,
+  MetaCommentSourceRead,
   MetaReviewRunRead,
   WorkerMonitorRead,
   SystemConfigRead,
@@ -373,8 +374,8 @@ function HomePageContent() {
     if (!focusedCommentId) return;
     const card = cardRefs.current[focusedCommentId];
     const mark = markRefs.current[focusedCommentId];
-    card?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-    mark?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    card?.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    mark?.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'nearest' });
   }, [focusedCommentId]);
 
   useEffect(() => {
@@ -385,8 +386,8 @@ function HomePageContent() {
     hoverAlignFrameRef.current = requestAnimationFrame(() => {
       const mark = markRefs.current[hoveredCommentId];
       const card = cardRefs.current[hoveredCommentId];
-      card?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-      mark?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      card?.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      mark?.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'nearest' });
     });
     return () => {
       if (hoverAlignFrameRef.current !== null) {
@@ -1559,6 +1560,13 @@ function HomePageContent() {
       ),
     [visibleComments]
   );
+  const commentById = useMemo(() => {
+    const map = new Map<number, CommentRead>();
+    for (const comment of comments) {
+      map.set(comment.id, comment);
+    }
+    return map;
+  }, [comments]);
   const hasFilteredOutComments = comments.length > 0 && visibleComments.length === 0;
 
   const personaMap = useMemo(() => {
@@ -1645,12 +1653,12 @@ function HomePageContent() {
     }
     hoverAlignFrameRef.current = requestAnimationFrame(() => {
       const card = metaCardRefs.current[hoveredMetaCommentId];
-      card?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      card?.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'nearest' });
       const metaItem = filteredMetaComments.find((item) => item.id === hoveredMetaCommentId);
       const sourceCommentId = metaItem?.sources[0]?.comment_id ?? null;
       if (sourceCommentId) {
         const mark = markRefs.current[sourceCommentId];
-        mark?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        mark?.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'nearest' });
       }
     });
     return () => {
@@ -2115,6 +2123,30 @@ function HomePageContent() {
   function focusComment(commentId: number) {
     setFocusedCommentId((prev) => (prev === commentId ? null : commentId));
     setDocMode('source');
+  }
+
+  function drillDownToSourceComment(source: MetaCommentSourceRead) {
+    const sourceComment = commentById.get(source.comment_id);
+    if (!sourceComment) {
+      setStatusMessage(`Source comment #${source.comment_id} is unavailable for this run.`);
+      return;
+    }
+
+    if (!enabledPersonas.has(sourceComment.persona_id)) {
+      setEnabledPersonas((prev) => {
+        const next = new Set(prev);
+        next.add(sourceComment.persona_id);
+        return next;
+      });
+    }
+
+    setCommentModeSelectionSource('manual');
+    setCommentViewMode('individual');
+    setFocusedMetaCommentId(null);
+    setHoveredMetaCommentId(null);
+    setFocusedCommentId(sourceComment.id);
+    setDocMode('source');
+    setStatusMessage(`Jumped to source comment #${source.comment_id} (${source.reviewer_name}).`);
   }
 
   function handleFeedPointerMove(event: ReactMouseEvent<HTMLDivElement>) {
@@ -3196,14 +3228,36 @@ function HomePageContent() {
                       <details className="comment-source">
                         <summary>Show sources ({metaComment.sources.length})</summary>
                         <div className="meta-sources">
-                          {metaComment.sources.map((source) => (
-                            <div key={source.id} className="meta-source-item">
-                              <div className="meta-source-head">
-                                {source.reviewer_name} · #{source.comment_id}
+                          {metaComment.sources.map((source) => {
+                            const sourceComment = commentById.get(source.comment_id);
+                            const sourceExcerpt = sourceComment?.excerpt?.trim();
+                            const isSelectedSource = activeCommentId === source.comment_id;
+                            return (
+                              <div
+                                key={source.id}
+                                className={`meta-source-item ${isSelectedSource ? 'selected' : ''}`}
+                              >
+                                <div className="meta-source-head">
+                                  {source.reviewer_name} · #{source.comment_id}
+                                </div>
+                                <div>{source.original_comment_text}</div>
+                                {sourceExcerpt && (
+                                  <div className="meta-source-excerpt">Anchor excerpt: “{sourceExcerpt}”</div>
+                                )}
+                                <button
+                                  type="button"
+                                  className="ghost-button source-jump-button"
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    drillDownToSourceComment(source);
+                                  }}
+                                >
+                                  Jump to source #{source.comment_id}
+                                </button>
                               </div>
-                              <div>{source.original_comment_text}</div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </details>
                     </div>
