@@ -55,6 +55,18 @@ def test_reset_default_personas(client) -> None:
     assert any(item.get("is_default") is True for item in payload)
 
 
+def test_default_personas_keep_explicit_sort_order_values(client) -> None:
+    headers = {"X-Tenant-Id": "tenant-default-sort"}
+    resp = client.post("/api/personas/reset-defaults", headers=headers)
+    assert resp.status_code == 200
+    payload = resp.json()
+
+    defaults_by_name = {item["name"]: item for item in payload if item.get("is_default")}
+    assert defaults_by_name["Clarity Editor"]["sort_order"] == 10
+    assert defaults_by_name["Risk & Compliance"]["sort_order"] == 20
+    assert defaults_by_name["Executive Summary"]["sort_order"] == 30
+
+
 def test_revert_single_default_persona(client) -> None:
     headers = {"X-Tenant-Id": "tenant-default-single"}
     seeded = client.post("/api/personas/reset-defaults", headers=headers)

@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from uuid import uuid4
 
 from app.db import models
 from app.db.init_db import seed_default_personas
@@ -54,6 +55,63 @@ def _assert_full_persona_contract(spec: dict) -> None:
     assert isinstance(spec["examples"], list)
 
 
+def _seed_review_context_without_personas(
+    db,
+    tenant_id: str,
+) -> tuple[models.DocumentVersion, models.ReviewJob]:
+    doc = models.Document(tenant_id=tenant_id, title="Ordered Test Doc")
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+
+    version = models.DocumentVersion(
+        tenant_id=tenant_id,
+        document_id=doc.id,
+        version_label="v1",
+        content="Ordered content for persona execution.",
+    )
+    db.add(version)
+    db.commit()
+    db.refresh(version)
+
+    job = models.ReviewJob(
+        tenant_id=tenant_id,
+        document_version_id=version.id,
+        status="queued",
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return version, job
+
+
+def _create_persona(
+    db,
+    tenant_id: str,
+    *,
+    name: str,
+    sort_order: int,
+    is_active: bool = True,
+) -> models.Persona:
+    persona = models.Persona(
+        tenant_id=tenant_id,
+        name=name,
+        description=f"{name} description",
+        system_prompt=f"{name} prompt",
+        focus_areas=["clarity"],
+        tone="direct",
+        reference_notes=f"{name} notes",
+        output_requirements={"format": "bullet_list", "max_bullets": 2},
+        examples=[f"Example for {name}"],
+        sort_order=sort_order,
+        is_active=is_active,
+    )
+    db.add(persona)
+    db.commit()
+    db.refresh(persona)
+    return persona
+
+
 def test_run_review_job_uses_full_persona_contract_payload(monkeypatch) -> None:
     db = SessionLocal()
     try:
@@ -93,6 +151,46 @@ def test_run_review_job_uses_full_persona_contract_payload(monkeypatch) -> None:
         for spec in captured_specs:
             _assert_full_persona_contract(spec)
             assert spec["sort_order"] is not None
+    finally:
+        db.close()
+
+
+def test_review_worker_executes_personas_in_sort_order_then_id(monkeypatch) -> None:
+    db = SessionLocal()
+    try:
+        tenant_id = f"tenant-test-persona-order-{uuid4().hex}"
+        monkeypatch.setattr("app.reviews.worker.settings.DOC_REPO_ENABLED", False)
+        monkeypatch.setattr("app.reviews.worker.settings.META_AUTO_SYNTHESIS_ENABLED", False)
+        monkeypatch.setattr("app.reviews.worker.as_completed", lambda futures: futures)
+
+        version, job = _seed_review_context_without_personas(db, tenant_id)
+        late = _create_persona(db, tenant_id, name="Late", sort_order=30)
+        early_a = _create_persona(db, tenant_id, name="Early A", sort_order=10)
+        early_b = _create_persona(db, tenant_id, name="Early B", sort_order=10)
+
+        execution_order: list[int] = []
+
+        monkeypatch.setattr(
+            "app.reviews.worker.generate_comments_for_spec",
+            lambda _persona, _content: ['Review: ordered check.'],
+        )
+
+        def _capture_persist_comments(
+            _db,
+            _tenant_id,
+            _version_id,
+            persona_id,
+            _review_job_id,
+            _comments,
+            _content,
+        ):
+            execution_order.append(persona_id)
+
+        monkeypatch.setattr("app.reviews.worker.persist_comments", _capture_persist_comments)
+
+        run_review_job(job.id, tenant_id)
+
+        assert execution_order == [early_a.id, early_b.id, late.id]
     finally:
         db.close()
 
@@ -164,6 +262,63 @@ def test_retry_failed_persona_uses_full_persona_contract_payload(monkeypatch) ->
         )
         assert len(created_comments) >= 1
         assert any('Clarify "world" term.' in comment.text for comment in created_comments)
+    finally:
+        db.close()
+
+
+def test_review_worker_persona_order_is_stable_across_reruns(monkeypatch) -> None:
+    db = SessionLocal()
+    try:
+        tenant_id = f"tenant-test-persona-order-stable-{uuid4().hex}"
+        monkeypatch.setattr("app.reviews.worker.settings.DOC_REPO_ENABLED", False)
+        monkeypatch.setattr("app.reviews.worker.settings.META_AUTO_SYNTHESIS_ENABLED", False)
+        monkeypatch.setattr("app.reviews.worker.as_completed", lambda futures: futures)
+
+        version, first_job = _seed_review_context_without_personas(db, tenant_id)
+        late = _create_persona(db, tenant_id, name="Late", sort_order=30)
+        early_a = _create_persona(db, tenant_id, name="Early A", sort_order=10)
+        early_b = _create_persona(db, tenant_id, name="Early B", sort_order=10)
+        expected = [early_a.id, early_b.id, late.id]
+
+        monkeypatch.setattr(
+            "app.reviews.worker.generate_comments_for_spec",
+            lambda _persona, _content: ['Review: ordered check.'],
+        )
+
+        capture = {"current": []}
+
+        def _capture_persist_comments(
+            _db,
+            _tenant_id,
+            _version_id,
+            persona_id,
+            _review_job_id,
+            _comments,
+            _content,
+        ):
+            capture["current"].append(persona_id)
+
+        monkeypatch.setattr("app.reviews.worker.persist_comments", _capture_persist_comments)
+
+        first_order: list[int] = []
+        capture["current"] = first_order
+        run_review_job(first_job.id, tenant_id)
+
+        second_job = models.ReviewJob(
+            tenant_id=tenant_id,
+            document_version_id=version.id,
+            status="queued",
+        )
+        db.add(second_job)
+        db.commit()
+        db.refresh(second_job)
+
+        second_order: list[int] = []
+        capture["current"] = second_order
+        run_review_job(second_job.id, tenant_id)
+
+        assert first_order == expected
+        assert second_order == expected
     finally:
         db.close()
 

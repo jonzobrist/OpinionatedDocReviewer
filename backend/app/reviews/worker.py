@@ -23,6 +23,18 @@ REVIEW_TIMEOUT_BACKOFF_SECONDS = [1, 2, 4]
 logger = logging.getLogger(__name__)
 
 
+def _list_active_personas_for_execution(
+    db: Session,
+    tenant_id: str,
+) -> list[models.Persona]:
+    return (
+        db.query(models.Persona)
+        .filter(models.Persona.tenant_id == tenant_id, models.Persona.is_active.is_(True))
+        .order_by(models.Persona.sort_order.asc(), models.Persona.id.asc())
+        .all()
+    )
+
+
 def _auto_trigger_meta_synthesis(
     db: Session,
     tenant_id: str,
@@ -105,20 +117,10 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
             db.commit()
             return
 
-        personas = (
-            db.query(models.Persona)
-            .filter(models.Persona.tenant_id == tenant_id, models.Persona.is_active.is_(True))
-            .order_by(models.Persona.id.asc())
-            .all()
-        )
+        personas = _list_active_personas_for_execution(db, tenant_id)
         if not personas:
             seed_default_personas(tenant_id=tenant_id, db=db)
-            personas = (
-                db.query(models.Persona)
-                .filter(models.Persona.tenant_id == tenant_id, models.Persona.is_active.is_(True))
-                .order_by(models.Persona.id.asc())
-                .all()
-            )
+            personas = _list_active_personas_for_execution(db, tenant_id)
 
         persona_specs = build_persona_execution_specs(personas)
 
