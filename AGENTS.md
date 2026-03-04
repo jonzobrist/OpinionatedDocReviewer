@@ -109,3 +109,32 @@ This document is optimized for future contributors (including AI agents) to quic
 - Keep code modular and well-typed.
 - Prefer small, reviewable PRs.
 
+## Local Dev Commands (Required)
+Use the project-managed toolchain for each app. Do not run backend tests with a bare system `python`/`pytest`.
+
+### Backend (`/backend`)
+- Install/sync deps: `cd backend && uv sync`
+- Update deps (when intentionally changing versions):
+  - Edit `pyproject.toml` dependency constraints
+  - Run: `cd backend && uv lock && uv sync`
+- Run tests:
+  - All backend tests: `cd backend && uv run pytest -q`
+  - Targeted tests: `cd backend && uv run pytest -q tests/test_meta_reviews.py`
+- Run lint/type checks (if configured in PR scope): `cd backend && uv run ruff check . && uv run mypy app`
+
+### Frontend (`/frontend`)
+- Install deps (clean/reproducible): `cd frontend && npm ci`
+- Update deps (when intentionally changing versions):
+  - Preferred targeted update: `cd frontend && npm install <pkg>@<version>`
+  - Then commit `package-lock.json` with code changes
+- Run tests:
+  - All frontend tests: `cd frontend && npm test -- --run`
+  - Targeted tests: `cd frontend && npm test -- --run tests/pageControls.test.tsx`
+- Run lint/build checks (if configured in PR scope):
+  - `cd frontend && npm run lint`
+  - `cd frontend && npm run build`
+
+### PR Validation Minimum
+- For backend-only changes: run relevant backend tests with `uv run pytest`.
+- For frontend-only changes: run relevant frontend tests with `npm test -- --run`.
+- For full-stack changes: run both backend and frontend targeted suites before review/merge.
