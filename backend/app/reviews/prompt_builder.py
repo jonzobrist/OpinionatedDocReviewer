@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 from app.db import models
@@ -21,19 +22,33 @@ REQUIRED_PERSONA_EXECUTION_SPEC_FIELDS = (
 def _normalize_focus_areas(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
-    return [str(item) for item in value]
+    normalized: list[str] = []
+    for item in value:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if text:
+            normalized.append(text)
+    return normalized
 
 
 def _normalize_examples(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
-    return [str(item) for item in value]
+    normalized: list[str] = []
+    for item in value:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if text:
+            normalized.append(text)
+    return normalized
 
 
 def _normalize_output_requirements(value: Any) -> dict:
     if not isinstance(value, dict):
         return {}
-    return dict(value)
+    return copy.deepcopy(value)
 
 
 def build_persona_execution_spec(persona: models.Persona) -> dict[str, Any]:

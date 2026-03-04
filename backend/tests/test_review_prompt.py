@@ -54,7 +54,7 @@ def test_build_persona_execution_spec_returns_copies_for_mutable_fields() -> Non
         focus_areas=["clarity"],
         tone="direct",
         reference_notes="notes",
-        output_requirements={"format": "bullet_list"},
+        output_requirements={"format": "bullet_list", "limits": {"max_bullets": 3}},
         examples=["example"],
         sort_order=7,
         is_active=True,
@@ -65,8 +65,35 @@ def test_build_persona_execution_spec_returns_copies_for_mutable_fields() -> Non
     spec = build_persona_execution_spec(persona)
     spec["focus_areas"].append("mutated")
     spec["output_requirements"]["max_bullets"] = 99
+    spec["output_requirements"]["limits"]["max_bullets"] = 99
     spec["examples"].append("mutated")
 
     assert persona.focus_areas == ["clarity"]
-    assert persona.output_requirements == {"format": "bullet_list"}
+    assert persona.output_requirements == {
+        "format": "bullet_list",
+        "limits": {"max_bullets": 3},
+    }
     assert persona.examples == ["example"]
+
+
+def test_build_persona_execution_spec_filters_blank_focus_areas_and_examples() -> None:
+    persona = models.Persona(
+        tenant_id="tenant-prompt-spec-normalize",
+        name="Normalize Persona",
+        description="normalize check",
+        system_prompt="Review contract consistency.",
+        focus_areas=[None, " clarity ", "", "   ", 123],
+        tone="direct",
+        reference_notes="notes",
+        output_requirements={"format": "bullet_list"},
+        examples=[None, " example ", "", "   ", 7],
+        sort_order=9,
+        is_active=True,
+        is_default=False,
+        is_system_locked=False,
+    )
+
+    spec = build_persona_execution_spec(persona)
+
+    assert spec["focus_areas"] == ["clarity", "123"]
+    assert spec["examples"] == ["example", "7"]
