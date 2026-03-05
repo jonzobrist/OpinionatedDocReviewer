@@ -2,6 +2,10 @@ from sqlalchemy.orm import Session
 
 from app.db import models
 from app.reviews.llm_provider import get_model_label, get_provider_name
+from app.reviews.quality_telemetry import (
+    build_empty_review_quality_telemetry,
+    normalize_review_quality_telemetry,
+)
 from app.schemas.review_job import ReviewJobCreate
 
 
@@ -13,6 +17,7 @@ def create_job(db: Session, tenant_id: str, data: ReviewJobCreate) -> models.Rev
         trigger=data.trigger or "auto",
         provider=get_provider_name(),
         model=get_model_label(),
+        quality_telemetry=build_empty_review_quality_telemetry(),
     )
     db.add(job)
     db.commit()
@@ -26,13 +31,16 @@ def list_jobs(
     query = db.query(models.ReviewJob).filter(models.ReviewJob.tenant_id == tenant_id)
     if document_version_id is not None:
         query = query.filter(models.ReviewJob.document_version_id == document_version_id)
-    return query.order_by(models.ReviewJob.id.asc()).all()
+    jobs = query.order_by(models.ReviewJob.id.asc()).all()
+    for job in jobs:
+        job.quality_telemetry = normalize_review_quality_telemetry(job.quality_telemetry)
+    return jobs
 
 
 def get_latest_job_for_version(
     db: Session, tenant_id: str, document_version_id: int
 ) -> models.ReviewJob | None:
-    return (
+    job = (
         db.query(models.ReviewJob)
         .filter(
             models.ReviewJob.tenant_id == tenant_id,
@@ -41,3 +49,6 @@ def get_latest_job_for_version(
         .order_by(models.ReviewJob.id.desc())
         .first()
     )
+    if job is not None:
+        job.quality_telemetry = normalize_review_quality_telemetry(job.quality_telemetry)
+    return job

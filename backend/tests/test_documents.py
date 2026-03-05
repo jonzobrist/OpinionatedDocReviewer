@@ -102,6 +102,7 @@ def test_import_review_bundle_restores_comments_and_meta(client) -> None:
             "trigger": "import",
             "provider": "openai",
             "model": "gpt-4o-mini",
+            "quality_telemetry": {"total_comments": 1},
         },
         "personas": [
             {
@@ -162,6 +163,18 @@ def test_import_review_bundle_restores_comments_and_meta(client) -> None:
     result = import_resp.json()
     assert result["comments_imported"] == 1
     assert result["meta_comments_imported"] == 1
+
+    jobs_resp = client.get(
+        f"/api/review-jobs?document_version_id={result['version_id']}",
+        headers=headers,
+    )
+    assert jobs_resp.status_code == 200
+    jobs = jobs_resp.json()
+    assert len(jobs) == 1
+    telemetry = jobs[0]["quality_telemetry"]
+    assert telemetry["total_comments"] == 1
+    assert telemetry["fallback_count"] == 0
+    assert telemetry["truncated_count"] == 0
 
     library_resp = client.get("/api/documents/library", headers=headers)
     assert library_resp.status_code == 200

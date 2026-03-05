@@ -15,6 +15,7 @@ class ReviewJobRead(BaseModel):
     trigger: str
     provider: str
     model: str
+    quality_telemetry: dict = Field(default_factory=dict)
     completed_at: datetime | None
     created_at: datetime
 

@@ -19,6 +19,7 @@ class BundleReviewJob(BaseModel):
     trigger: str = "import"
     provider: str = "import"
     model: str = "bundle"
+    quality_telemetry: dict | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
 
