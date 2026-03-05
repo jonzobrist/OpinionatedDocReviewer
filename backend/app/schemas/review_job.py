@@ -1,10 +1,29 @@
 from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.reviews.quality_telemetry import build_empty_review_quality_telemetry
 
 
 class ReviewJobCreate(BaseModel):
     document_version_id: int
     trigger: str | None = None
+
+
+class ReviewJobQualityPersonaRead(BaseModel):
+    persona_id: int | None = None
+    total_comments: int = Field(default=0, ge=0)
+    fallback_count: int = Field(default=0, ge=0)
+    truncated_count: int = Field(default=0, ge=0)
+    violation_count_by_type: dict[str, int] = Field(default_factory=dict)
+
+
+class ReviewJobQualitySummaryRead(BaseModel):
+    total_comments: int = Field(default=0, ge=0)
+    fallback_count: int = Field(default=0, ge=0)
+    truncated_count: int = Field(default=0, ge=0)
+    violation_count_by_type: dict[str, int] = Field(default_factory=dict)
+    per_persona: dict[str, ReviewJobQualityPersonaRead] = Field(default_factory=dict)
 
 
 class ReviewJobRead(BaseModel):
@@ -15,7 +34,9 @@ class ReviewJobRead(BaseModel):
     trigger: str
     provider: str
     model: str
-    quality_telemetry: dict = Field(default_factory=dict)
+    quality_telemetry: ReviewJobQualitySummaryRead = Field(
+        default_factory=lambda: ReviewJobQualitySummaryRead(**build_empty_review_quality_telemetry())
+    )
     completed_at: datetime | None
     created_at: datetime
 
