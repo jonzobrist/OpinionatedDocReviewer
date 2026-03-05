@@ -142,6 +142,9 @@ export type ReviewJobRead = {
   trigger: string;
   provider: string;
   model: string;
+  generation_index?: number | null;
+  is_latest_for_version?: boolean | null;
+  comment_count?: number;
   completed_at: string | null;
   created_at: string;
 };
