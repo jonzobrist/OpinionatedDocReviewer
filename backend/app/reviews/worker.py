@@ -409,6 +409,37 @@ def _truncate_examples(examples: list[str], max_count: int, max_total_chars: int
     return trimmed, truncated
 
 
+def _normalize_output_metadata(
+    output_metadata: dict | None,
+    requirements: dict,
+    *,
+    default_violations: list[str] | None = None,
+    default_used_fallback: bool = False,
+) -> dict:
+    normalized = dict(output_metadata) if isinstance(output_metadata, dict) else {}
+
+    requirement_source = normalized.get("requirements")
+    normalized["requirements"] = normalize_output_requirements(
+        requirement_source if isinstance(requirement_source, dict) else requirements
+    )
+
+    violations_value = normalized.get("violations")
+    if isinstance(violations_value, list):
+        normalized["violations"] = [
+            str(item).strip()
+            for item in violations_value
+            if item is not None and str(item).strip()
+        ]
+    elif default_violations is not None:
+        normalized["violations"] = default_violations
+    else:
+        normalized["violations"] = []
+
+    normalized["used_fallback"] = bool(normalized.get("used_fallback", default_used_fallback))
+    normalized["truncated"] = bool(normalized.get("truncated", False))
+    return normalized
+
+
 def _normalize_parsed_comments(raw_comments: list[ParsedComment] | list[str], output_requirements: dict | None) -> list[ParsedComment]:
     if not raw_comments:
         return []
@@ -416,17 +447,25 @@ def _normalize_parsed_comments(raw_comments: list[ParsedComment] | list[str], ou
     requirements = normalize_output_requirements(output_requirements)
     for entry in raw_comments:
         if isinstance(entry, ParsedComment):
-            normalized.append(entry)
+            normalized.append(
+                ParsedComment(
+                    text=entry.text,
+                    output_metadata=_normalize_output_metadata(
+                        entry.output_metadata,
+                        requirements,
+                    ),
+                )
+            )
             continue
         normalized.append(
             ParsedComment(
                 text=str(entry),
-                output_metadata={
-                    "requirements": requirements,
-                    "violations": ["unstructured_output"],
-                    "used_fallback": True,
-                    "truncated": False,
-                },
+                output_metadata=_normalize_output_metadata(
+                    None,
+                    requirements,
+                    default_violations=["unstructured_output"],
+                    default_used_fallback=True,
+                ),
             )
         )
     return normalized
@@ -504,10 +543,31 @@ def retry_failed_persona_in_job(
         ).delete(synchronize_session=False)
         db.commit()
 
-        comments = generate_comments_for_spec(
-            build_persona_execution_spec(persona),
-            version.content,
-        )
+        spec = build_persona_execution_spec(persona)
+        try:
+            comments = _normalize_parsed_comments(
+                generate_comments_for_spec(spec, version.content),
+                spec.get("output_requirements"),
+            )
+        except Exception as exc:
+            logger.exception(
+                "retry_persona_generation_failed review_job_id=%s persona_id=%s tenant_id=%s",
+                review_job_id,
+                persona_id,
+                tenant_id,
+            )
+            comments = [
+                ParsedComment(
+                    text=f"Review failed: {exc}",
+                    output_metadata={
+                        "requirements": normalize_output_requirements(spec.get("output_requirements")),
+                        "violations": ["review_failed"],
+                        "used_fallback": True,
+                        "truncated": False,
+                    },
+                )
+            ]
+
         persist_comments(
             db,
             tenant_id,

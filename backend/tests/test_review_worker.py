@@ -6,7 +6,7 @@ from uuid import uuid4
 from app.db import models
 from app.db.init_db import seed_default_personas
 from app.db.session import SessionLocal
-from app.reviews.parsing import ParsedComment
+from app.reviews.parsing import ParsedComment, normalize_output_requirements
 from app.reviews.prompt_builder import REQUIRED_PERSONA_EXECUTION_SPEC_FIELDS
 from app.reviews.worker import (
     _auto_trigger_meta_synthesis,
@@ -262,6 +262,99 @@ def test_retry_failed_persona_uses_full_persona_contract_payload(monkeypatch) ->
         )
         assert len(created_comments) >= 1
         assert any('Clarify "world" term.' in comment.text for comment in created_comments)
+    finally:
+        db.close()
+
+
+def test_retry_failed_persona_normalizes_output_metadata_schema(monkeypatch) -> None:
+    db = SessionLocal()
+    try:
+        tenant_id = "tenant-test-persona-retry-metadata"
+        _version, job = _seed_review_context(db, tenant_id)
+
+        persona = (
+            db.query(models.Persona)
+            .filter(models.Persona.tenant_id == tenant_id, models.Persona.is_active.is_(True))
+            .order_by(models.Persona.id.asc())
+            .first()
+        )
+        assert persona is not None
+
+        monkeypatch.setattr(
+            "app.reviews.worker.generate_comments_for_spec",
+            lambda _persona_spec, _content: [
+                ParsedComment(
+                    text='Clarify "world" term.',
+                    output_metadata={},
+                )
+            ],
+        )
+
+        added = retry_failed_persona_in_job(job.id, tenant_id, persona.id)
+        assert added == 1
+
+        created = (
+            db.query(models.Comment)
+            .filter(
+                models.Comment.tenant_id == tenant_id,
+                models.Comment.review_job_id == job.id,
+                models.Comment.persona_id == persona.id,
+            )
+            .order_by(models.Comment.id.desc())
+            .first()
+        )
+        assert created is not None
+        metadata = created.output_metadata
+        assert metadata["requirements"] == normalize_output_requirements(persona.output_requirements)
+        assert metadata["violations"] == []
+        assert metadata["used_fallback"] is False
+        assert metadata["truncated"] is False
+    finally:
+        db.close()
+
+
+def test_retry_failed_persona_persists_failure_fallback_metadata(monkeypatch) -> None:
+    db = SessionLocal()
+    try:
+        tenant_id = "tenant-test-persona-retry-fallback"
+        _version, job = _seed_review_context(db, tenant_id)
+
+        persona = (
+            db.query(models.Persona)
+            .filter(models.Persona.tenant_id == tenant_id, models.Persona.is_active.is_(True))
+            .order_by(models.Persona.id.asc())
+            .first()
+        )
+        assert persona is not None
+
+        def _raise_generation_error(_persona_spec, _content):
+            raise RuntimeError("provider unavailable")
+
+        monkeypatch.setattr(
+            "app.reviews.worker.generate_comments_for_spec",
+            _raise_generation_error,
+        )
+
+        added = retry_failed_persona_in_job(job.id, tenant_id, persona.id)
+        assert added == 1
+
+        failure_comment = (
+            db.query(models.Comment)
+            .filter(
+                models.Comment.tenant_id == tenant_id,
+                models.Comment.review_job_id == job.id,
+                models.Comment.persona_id == persona.id,
+                models.Comment.text.like("Review failed:%"),
+            )
+            .order_by(models.Comment.id.desc())
+            .first()
+        )
+        assert failure_comment is not None
+        metadata = failure_comment.output_metadata
+        assert metadata["requirements"] == normalize_output_requirements(persona.output_requirements)
+        assert metadata["violations"] == ["review_failed"]
+        assert metadata["used_fallback"] is True
+        assert metadata["truncated"] is False
     finally:
         db.close()
 
