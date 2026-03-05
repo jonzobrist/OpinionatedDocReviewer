@@ -10,10 +10,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-      - name: Run backend tests (includes OpenAI/Bedrock provider smoke tests)
+      - name: Install backend deps
         run: |
           cd backend
           uv sync --extra test
+      - name: Run Track-1 review-contract regression tests (M2 gate)
+        run: |
+          cd backend
+          uv run pytest tests/test_review_prompt.py tests/test_review_parsing.py tests/test_review_worker.py tests/test_personas.py
+      - name: Run backend tests (includes OpenAI/Bedrock provider smoke tests)
+        run: |
+          cd backend
           uv run pytest
 
   frontend:
