@@ -105,3 +105,15 @@ gh api repos/jonzobrist/OpinionatedDocReviewer/branches/main/protection --jq '{r
 ### Operational note
 - CODEOWNERS placeholder handles were replaced with `@jonzobrist` to make CODEOWNER review enforcement effective immediately.
 - Follow-up: split ownership by area/team once long-term maintainers are confirmed.
+
+## Update: Track-1 review-contract CI gate added (2026-03-05 01:43 UTC)
+
+### Change summary
+- Added explicit CI segment in `/home/zob/src/OpinionatedDocReviewer/.github/workflows/ci.yml` under job/context `backend`:
+  - Step name: `Run Track-1 review-contract regression tests (M2 gate)`
+  - Command scope: `tests/test_review_prompt.py`, `tests/test_review_parsing.py`, `tests/test_review_worker.py`, `tests/test_personas.py`
+- Branch-protection required status-check contexts are **unchanged**:
+  - `backend`, `frontend`, `dependency-review`, `backend-audit`, `frontend-audit`
+
+### Policy fit
+- The Track-1 gate is enforced inside the required `backend` context, so existing branch protection remains compatible while adding stricter M2 quality coverage.

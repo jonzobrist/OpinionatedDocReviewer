@@ -178,8 +178,15 @@ If branch protection/rulesets are available for this repository type:
 - Require PR before merge
 - Require at least 1 approval
 - Require conversation resolution
-- Require status checks: `CI / backend`, `CI / frontend`, `Security Scan / backend-audit`, `Security Scan / frontend-audit`
+- Require status-check contexts: `backend`, `frontend`, `dependency-review`, `backend-audit`, `frontend-audit`
 - Restrict force-push/deletions on `main`
+
+Mapping note (workflow display -> enforceable context):
+- `CI / backend` -> `backend`
+- `CI / frontend` -> `frontend`
+- `Security Scan / dependency-review` -> `dependency-review`
+- `Security Scan / backend-audit` -> `backend-audit`
+- `Security Scan / frontend-audit` -> `frontend-audit`
 
 If not available in your specific free-tier context:
 - Enforce socially: no direct pushes to `main`
@@ -225,6 +232,24 @@ Noise controls:
 - Easy rollback: disable/delete workflow file.
 
 None of the above require paid GitHub plans.
+
+### M2 Track-1 review-contract quality gate (Issue #84)
+
+This repository now enforces an explicit Track-1 regression segment in CI under the required `backend` context:
+- Workflow: `/home/zob/src/OpinionatedDocReviewer/.github/workflows/ci.yml`
+- Step: `Run Track-1 review-contract regression tests (M2 gate)`
+- Command:
+  ```bash
+  cd /home/zob/src/OpinionatedDocReviewer/backend && uv sync --extra test && uv run pytest tests/test_review_prompt.py tests/test_review_parsing.py tests/test_review_worker.py tests/test_personas.py
+  ```
+
+Contributor expectation for PRs touching the review engine (`/home/zob/src/OpinionatedDocReviewer/backend/app/reviews/**` and related parser/prompt tests):
+- Run the Track-1 command above locally before opening PR.
+- Include command output in PR evidence section.
+
+Branch-protection compatibility note:
+- Required contexts remain `backend`, `frontend`, `dependency-review`, `backend-audit`, `frontend-audit`.
+- See `/home/zob/src/OpinionatedDocReviewer/docs/process/github-branch-protection-audit.md` for audit evidence.
 
 ---
 
