@@ -1,0 +1,56 @@
+name: Stalled Lane Watchdog
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run without posting comments"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: stalled-lane-watchdog
+  cancel-in-progress: false
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Static sanity check
+        run: python3 -m py_compile scripts/github/stalled_lane_watchdog.py
+
+      - name: Run stalled-lane watchdog
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+
+          EXTRA_ARGS=""
+          if [ "${DRY_RUN}" = "true" ]; then
+            EXTRA_ARGS="--dry-run"
+          fi
+
+          python3 scripts/github/stalled_lane_watchdog.py \
+            --repo "${{ github.repository }}" \
+            ${EXTRA_ARGS}
