@@ -25,6 +25,10 @@ from app.reviews.prompt_builder import (
     build_review_prompt,
     trim_prompt_content,
 )
+from app.reviews.quality_telemetry import (
+    build_review_quality_telemetry_from_entries,
+    normalize_review_quality_telemetry,
+)
 from app.reviews.git_repo import ensure_repo
 from app.reviews.review_storage import write_review_and_commit
 from datetime import datetime, timezone
@@ -45,6 +49,25 @@ def _list_active_personas_for_execution(
         .filter(models.Persona.tenant_id == tenant_id, models.Persona.is_active.is_(True))
         .order_by(models.Persona.sort_order.asc(), models.Persona.id.asc())
         .all()
+    )
+
+
+def _compute_review_job_quality_telemetry(
+    db: Session,
+    tenant_id: str,
+    review_job_id: int,
+) -> dict:
+    rows = (
+        db.query(models.Comment.persona_id, models.Comment.output_metadata)
+        .filter(
+            models.Comment.tenant_id == tenant_id,
+            models.Comment.review_job_id == review_job_id,
+        )
+        .order_by(models.Comment.id.asc())
+        .all()
+    )
+    return build_review_quality_telemetry_from_entries(
+        (row.persona_id, row.output_metadata, None) for row in rows
     )
 
 
@@ -138,6 +161,7 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
         persona_specs = build_persona_execution_specs(personas)
 
         results: list[dict] = []
+        telemetry_entries: list[tuple[int | None, dict | None, dict | None]] = []
         max_workers = max(1, min(len(persona_specs), 6))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {}
@@ -160,6 +184,14 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
                         comments,
                         version.content,
                     )
+                    for entry in comments:
+                        telemetry_entries.append(
+                            (
+                                spec["id"],
+                                entry.output_metadata,
+                                spec.get("output_requirements"),
+                            )
+                        )
                     results.append(
                         {
                             "persona_id": spec["id"],
@@ -192,6 +224,13 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
                         [failure],
                         version.content,
                     )
+                    telemetry_entries.append(
+                        (
+                            spec["id"],
+                            failure.output_metadata,
+                            spec.get("output_requirements"),
+                        )
+                    )
                     results.append(
                         {
                             "persona_id": spec["id"],
@@ -202,6 +241,7 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
                         }
                     )
 
+        job.quality_telemetry = build_review_quality_telemetry_from_entries(telemetry_entries)
         job.status = "completed"
         job.completed_at = datetime.now(timezone.utc)
         db.commit()
@@ -225,6 +265,7 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
                     "completed_at": job.completed_at.isoformat() if job.completed_at else None,
                     "provider": job.provider,
                     "model": job.model,
+                    "quality_telemetry": normalize_review_quality_telemetry(job.quality_telemetry),
                     "results": results,
                 }
                 write_review_and_commit(repo, version.id, review_job_id, payload)
@@ -241,6 +282,11 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
                 .first()
             )
             if job:
+                job.quality_telemetry = _compute_review_job_quality_telemetry(
+                    db,
+                    tenant_id,
+                    review_job_id,
+                )
                 job.status = "failed"
                 job.completed_at = datetime.now(timezone.utc)
                 db.commit()
@@ -484,6 +530,13 @@ def retry_failed_persona_in_job(
             comments,
             version.content,
         )
+
+        job.quality_telemetry = _compute_review_job_quality_telemetry(
+            db,
+            tenant_id,
+            review_job_id,
+        )
+        db.commit()
         return len(comments)
     finally:
         db.close()

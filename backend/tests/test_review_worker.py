@@ -6,7 +6,15 @@ from uuid import uuid4
 from app.db import models
 from app.db.init_db import seed_default_personas
 from app.db.session import SessionLocal
-from app.reviews.parsing import ParsedComment, normalize_output_requirements
+from app.reviews.parsing import (
+    ParsedComment,
+    VIOLATION_MISSING_ACTIONABLE,
+    VIOLATION_MISSING_QUOTE_EXCERPT,
+    VIOLATION_REVIEW_FAILED,
+    VIOLATION_TRUNCATED_OUTPUT,
+    VIOLATION_UNSTRUCTURED_OUTPUT,
+    normalize_output_requirements,
+)
 from app.reviews.prompt_builder import REQUIRED_PERSONA_EXECUTION_SPEC_FIELDS
 from app.reviews.worker import (
     _auto_trigger_meta_synthesis,
@@ -473,6 +481,117 @@ def test_review_worker_generates_comments_and_auto_triggers_meta(monkeypatch) ->
         assert trigger_calls["document_version_id"] == version.id
         assert trigger_calls["review_job_id"] == job.id
         assert trigger_calls["force"] == 0
+    finally:
+        db.close()
+
+
+def test_review_worker_persists_quality_telemetry_with_per_persona_counts(monkeypatch) -> None:
+    db = SessionLocal()
+    try:
+        tenant_id = "tenant-test-quality-telemetry"
+        monkeypatch.setattr("app.reviews.worker.settings.DOC_REPO_ENABLED", False)
+        monkeypatch.setattr("app.reviews.worker.settings.META_AUTO_SYNTHESIS_ENABLED", False)
+
+        _version, job = _seed_review_context(db, tenant_id)
+        personas = (
+            db.query(models.Persona)
+            .filter(models.Persona.tenant_id == tenant_id, models.Persona.is_active.is_(True))
+            .order_by(models.Persona.sort_order.asc(), models.Persona.id.asc())
+            .all()
+        )
+        assert len(personas) == 3
+        first_persona_id = personas[0].id
+        second_persona_id = personas[1].id
+
+        def _fake_generate_comments_for_spec(persona, _content):
+            if persona["id"] == first_persona_id:
+                return [
+                    ParsedComment(
+                        text="Needs quote evidence.",
+                        output_metadata={
+                            "used_fallback": True,
+                            "violations": [VIOLATION_MISSING_QUOTE_EXCERPT],
+                        },
+                    )
+                ]
+            if persona["id"] == second_persona_id:
+                return [
+                    ParsedComment(
+                        text="Clarify action scope.",
+                        output_metadata={
+                            "truncated": True,
+                            "violations": [VIOLATION_MISSING_ACTIONABLE],
+                        },
+                    )
+                ]
+            return ["Unstructured summary output"]
+
+        monkeypatch.setattr(
+            "app.reviews.worker.generate_comments_for_spec",
+            _fake_generate_comments_for_spec,
+        )
+
+        run_review_job(job.id, tenant_id)
+
+        db.refresh(job)
+        telemetry = job.quality_telemetry
+        assert job.status == "completed"
+        assert telemetry["total_comments"] == 3
+        assert telemetry["fallback_count"] == 2
+        assert telemetry["truncated_count"] == 1
+        assert telemetry["violation_count_by_type"][VIOLATION_MISSING_QUOTE_EXCERPT] == 1
+        assert telemetry["violation_count_by_type"][VIOLATION_MISSING_ACTIONABLE] == 1
+        assert telemetry["violation_count_by_type"][VIOLATION_UNSTRUCTURED_OUTPUT] == 1
+        assert telemetry["violation_count_by_type"][VIOLATION_TRUNCATED_OUTPUT] == 1
+        per_persona = telemetry["per_persona"]
+        for persona in personas:
+            assert per_persona[str(persona.id)]["total_comments"] == 1
+    finally:
+        db.close()
+
+
+def test_retry_failed_persona_recomputes_review_job_quality_telemetry(monkeypatch) -> None:
+    db = SessionLocal()
+    try:
+        tenant_id = "tenant-test-retry-quality-telemetry"
+        monkeypatch.setattr("app.reviews.worker.settings.DOC_REPO_ENABLED", False)
+        monkeypatch.setattr("app.reviews.worker.settings.META_AUTO_SYNTHESIS_ENABLED", False)
+
+        _version, job = _seed_review_context(db, tenant_id)
+        persona = (
+            db.query(models.Persona)
+            .filter(models.Persona.tenant_id == tenant_id, models.Persona.is_active.is_(True))
+            .order_by(models.Persona.id.asc())
+            .first()
+        )
+        assert persona is not None
+
+        monkeypatch.setattr(
+            "app.reviews.worker.generate_comments_for_spec",
+            lambda _persona_spec, _content: ["Initial unstructured output"],
+        )
+        run_review_job(job.id, tenant_id)
+
+        db.refresh(job)
+        before_total = job.quality_telemetry["total_comments"]
+        before_persona_total = job.quality_telemetry["per_persona"][str(persona.id)]["total_comments"]
+
+        monkeypatch.setattr(
+            "app.reviews.worker.generate_comments_for_spec",
+            lambda _persona_spec, _content: [
+                ParsedComment(
+                    text='"world" :: clarify wording',
+                    output_metadata={},
+                )
+            ],
+        )
+        added = retry_failed_persona_in_job(job.id, tenant_id, persona.id)
+
+        assert added == 1
+        db.refresh(job)
+        assert job.quality_telemetry["total_comments"] == before_total + 1
+        assert job.quality_telemetry["per_persona"][str(persona.id)]["total_comments"] == before_persona_total + 1
+        assert job.quality_telemetry["violation_count_by_type"][VIOLATION_REVIEW_FAILED] == 0
     finally:
         db.close()
 

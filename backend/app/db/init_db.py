@@ -263,6 +263,7 @@ def _ensure_schema() -> None:
             "completed_at",
             "DATETIME",
         )
+        _ensure_review_job_quality_telemetry_column(connection)
         _ensure_column(
             connection,
             "comments",
@@ -399,6 +400,22 @@ def _ensure_schema() -> None:
             )
         )
         connection.commit()
+
+
+def _ensure_review_job_quality_telemetry_column(connection) -> None:
+    _ensure_column(
+        connection,
+        "review_jobs",
+        "quality_telemetry",
+        "JSON",
+    )
+    connection.execute(
+        text(
+            "UPDATE review_jobs "
+            "SET quality_telemetry='{}' "
+            "WHERE quality_telemetry IS NULL OR quality_telemetry=''"
+        )
+    )
 
 
 def _ensure_column(connection, table: str, column: str, ddl: str) -> None:

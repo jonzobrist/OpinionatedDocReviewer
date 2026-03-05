@@ -100,6 +100,7 @@ class ReviewJob(Base):
     trigger: Mapped[str] = mapped_column(String(50), default="auto")
     provider: Mapped[str] = mapped_column(String(50), default="openai")
     model: Mapped[str] = mapped_column(String(200), default="gpt-4o-mini")
+    quality_telemetry: Mapped[dict] = mapped_column(JSON, default=dict)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)

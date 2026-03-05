@@ -32,6 +32,10 @@ from app.schemas.document_version import DocumentVersionCreate, DocumentVersionR
 from app.schemas.review_bundle import ReviewBundleImport, ReviewBundleImportResult
 from app.reviews.git_repo import ensure_repo
 from app.reviews.git_history import list_commits
+from app.reviews.quality_telemetry import (
+    build_empty_review_quality_telemetry,
+    normalize_review_quality_telemetry,
+)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -273,6 +277,9 @@ def import_bundle(
             trigger=payload.review_job.trigger,
             provider=payload.review_job.provider,
             model=payload.review_job.model,
+            quality_telemetry=normalize_review_quality_telemetry(payload.review_job.quality_telemetry)
+            if payload.review_job.quality_telemetry is not None
+            else build_empty_review_quality_telemetry(),
         )
         if payload.review_job.created_at is not None:
             review_job_data["created_at"] = payload.review_job.created_at
