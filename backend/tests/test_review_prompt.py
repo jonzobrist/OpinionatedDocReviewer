@@ -1,3 +1,7 @@
+import difflib
+import itertools
+import json
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from app.db import models
@@ -10,11 +14,64 @@ from app.reviews.prompt_builder import (
     truncate_prompt_section,
 )
 
-FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "review_prompt"
+REVIEW_PROMPT_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "review_prompt"
+GOLDEN_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "persona_golden"
+GOLDEN_PROMPT_FIXTURE_DIR = GOLDEN_FIXTURE_DIR / "prompts"
+
+EXPECTED_GOLDEN_PERSONA_NAMES = [
+    "Clarity Editor",
+    "Risk & Compliance",
+    "Executive Summary",
+    "Nielsen Contrarian",
+]
+
+GOLDEN_PROMPT_SNAPSHOT_FILES = {
+    "Clarity Editor": "clarity_editor.txt",
+    "Risk & Compliance": "risk_and_compliance.txt",
+    "Executive Summary": "executive_summary.txt",
+    "Nielsen Contrarian": "nielsen_contrarian.txt",
+}
+
+MAX_NEAR_DUPLICATE_PROMPT_RATIO = 0.85
 
 
-def _load_fixture(name: str) -> str:
-    return (FIXTURE_DIR / name).read_text(encoding="utf-8")
+def _load_fixture(base_dir: Path, name: str) -> str:
+    return (base_dir / name).read_text(encoding="utf-8")
+
+
+def _load_golden_persona_bundle() -> dict:
+    return json.loads(_load_fixture(GOLDEN_FIXTURE_DIR, "persona_bundle_v1.json"))
+
+
+def _assert_text_fixture(actual: str, *, fixture_path: Path, context: str) -> None:
+    expected = fixture_path.read_text(encoding="utf-8")
+    if actual == expected:
+        return
+
+    diff = "".join(
+        difflib.unified_diff(
+            expected.splitlines(keepends=True),
+            actual.splitlines(keepends=True),
+            fromfile=f"expected/{fixture_path.name}",
+            tofile=f"actual/{fixture_path.name}",
+            n=2,
+        )
+    )
+    raise AssertionError(f"{context} snapshot mismatch:\n{diff}")
+
+
+def _build_prompt_for_fixture_persona(persona: dict, document_content: str) -> str:
+    return build_review_prompt(
+        name=persona["name"],
+        description=persona.get("description"),
+        system_prompt=persona.get("system_prompt"),
+        focus_areas=persona.get("focus_areas"),
+        tone=persona.get("tone"),
+        content=document_content,
+        reference_notes=persona.get("reference_notes"),
+        output_requirements=persona.get("output_requirements"),
+        examples=persona.get("examples"),
+    )
 
 
 def test_build_review_prompt_handles_none_focus_items() -> None:
@@ -105,7 +162,11 @@ def test_build_review_prompt_contract_snapshot() -> None:
         examples=['[high] "token" :: define expiration behavior'],
     )
 
-    assert prompt == _load_fixture("contract_snapshot.txt")
+    _assert_text_fixture(
+        prompt,
+        fixture_path=REVIEW_PROMPT_FIXTURE_DIR / "contract_snapshot.txt",
+        context="review prompt contract",
+    )
 
 
 def test_build_review_prompt_truncation_snapshot() -> None:
@@ -130,7 +191,63 @@ def test_build_review_prompt_truncation_snapshot() -> None:
         examples_max_total_chars=15,
     )
 
-    assert prompt == _load_fixture("truncation_snapshot.txt")
+    _assert_text_fixture(
+        prompt,
+        fixture_path=REVIEW_PROMPT_FIXTURE_DIR / "truncation_snapshot.txt",
+        context="review prompt truncation",
+    )
+
+
+def test_golden_persona_fixture_contains_representative_personas() -> None:
+    bundle = _load_golden_persona_bundle()
+    names = [persona["name"] for persona in bundle["personas"]]
+    assert names == EXPECTED_GOLDEN_PERSONA_NAMES
+
+
+def test_golden_persona_prompt_snapshots_are_stable() -> None:
+    bundle = _load_golden_persona_bundle()
+    content = _load_fixture(GOLDEN_FIXTURE_DIR, "sample_document.txt").strip()
+
+    for persona in bundle["personas"]:
+        prompt = _build_prompt_for_fixture_persona(persona, content)
+        snapshot_name = GOLDEN_PROMPT_SNAPSHOT_FILES[persona["name"]]
+        _assert_text_fixture(
+            prompt,
+            fixture_path=GOLDEN_PROMPT_FIXTURE_DIR / snapshot_name,
+            context=f"golden persona prompt ({persona['name']})",
+        )
+
+
+def test_golden_persona_prompts_are_differentiated() -> None:
+    bundle = _load_golden_persona_bundle()
+    content = _load_fixture(GOLDEN_FIXTURE_DIR, "sample_document.txt").strip()
+
+    prompts = {
+        persona["name"]: _build_prompt_for_fixture_persona(persona, content)
+        for persona in bundle["personas"]
+    }
+
+    for left_name, right_name in itertools.combinations(prompts.keys(), 2):
+        left_prompt = prompts[left_name]
+        right_prompt = prompts[right_name]
+        similarity = SequenceMatcher(None, left_prompt, right_prompt).ratio()
+        if similarity < MAX_NEAR_DUPLICATE_PROMPT_RATIO:
+            continue
+
+        diff = "".join(
+            difflib.unified_diff(
+                left_prompt.splitlines(keepends=True),
+                right_prompt.splitlines(keepends=True),
+                fromfile=f"prompt/{left_name}",
+                tofile=f"prompt/{right_name}",
+                n=2,
+            )
+        )
+        raise AssertionError(
+            "Golden persona prompts became near-duplicates "
+            f"({left_name} vs {right_name}, similarity={similarity:.3f} >= {MAX_NEAR_DUPLICATE_PROMPT_RATIO}).\n"
+            f"Diff:\n{diff}"
+        )
 
 
 def test_build_persona_execution_spec_includes_all_required_contract_fields() -> None:

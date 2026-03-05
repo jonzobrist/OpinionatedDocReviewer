@@ -1,0 +1,4 @@
+Project Atlas is rolling out a new policy engine to all regional teams in Q3.
+The current plan says security controls will be improved over time, but it does not define exact milestones.
+Several teams still store API keys in local environment files, and ownership for key rotation is not assigned.
+Leadership expects a concise executive update next week with a go or no-go recommendation.
