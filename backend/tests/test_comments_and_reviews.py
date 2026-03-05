@@ -55,17 +55,24 @@ def test_comments_and_review_jobs(client, monkeypatch) -> None:
     assert job_data["status"] == "queued"
     assert job_data["provider"] in {"openai", "bedrock"}
     assert isinstance(job_data["model"], str)
+    assert job_data["generation_index"] == 1
+    assert job_data["is_latest_for_version"] is True
+    assert job_data["comment_count"] == 0
     _assert_quality_telemetry_contract(job_data["quality_telemetry"])
 
     list_jobs = client.get(f"/api/review-jobs?document_version_id={version_id}", headers=headers)
     assert list_jobs.status_code == 200
     jobs = list_jobs.json()
     assert len(jobs) == 1
+    assert jobs[0]["generation_index"] == 1
+    assert jobs[0]["is_latest_for_version"] is True
+    assert jobs[0]["comment_count"] == 0
     _assert_quality_telemetry_contract(jobs[0]["quality_telemetry"])
 
     comment_payload = {
         "persona_id": persona_id,
         "document_version_id": version_id,
+        "review_job_id": job_data["id"],
         "text": "Consider adding more details.",
         "start_offset": 0,
         "end_offset": 5,
@@ -79,6 +86,45 @@ def test_comments_and_review_jobs(client, monkeypatch) -> None:
     )
     assert list_comments.status_code == 200
     assert len(list_comments.json()) == 1
+
+    list_jobs_after_comment = client.get(
+        f"/api/review-jobs?document_version_id={version_id}", headers=headers
+    )
+    assert list_jobs_after_comment.status_code == 200
+    jobs_after_comment = list_jobs_after_comment.json()
+    assert len(jobs_after_comment) == 1
+    assert jobs_after_comment[0]["generation_index"] == 1
+    assert jobs_after_comment[0]["is_latest_for_version"] is True
+    assert jobs_after_comment[0]["comment_count"] == 1
+
+    second_job_resp = client.post(
+        "/api/review-jobs",
+        json={"document_version_id": version_id, "trigger": "manual"},
+        headers=headers,
+    )
+    assert second_job_resp.status_code == 201
+    second_job_data = second_job_resp.json()
+    assert second_job_data["generation_index"] == 2
+    assert second_job_data["is_latest_for_version"] is True
+    assert second_job_data["comment_count"] == 0
+
+    list_jobs_two_runs = client.get(
+        f"/api/review-jobs?document_version_id={version_id}", headers=headers
+    )
+    assert list_jobs_two_runs.status_code == 200
+    jobs_two_runs = list_jobs_two_runs.json()
+    assert len(jobs_two_runs) == 2
+
+    first, second = jobs_two_runs
+    assert first["id"] == job_data["id"]
+    assert first["generation_index"] == 1
+    assert first["is_latest_for_version"] is False
+    assert first["comment_count"] == 1
+
+    assert second["id"] == second_job_data["id"]
+    assert second["generation_index"] == 2
+    assert second["is_latest_for_version"] is True
+    assert second["comment_count"] == 0
 
 
 def test_comments_endpoint_normalizes_legacy_output_metadata(client, monkeypatch) -> None:
