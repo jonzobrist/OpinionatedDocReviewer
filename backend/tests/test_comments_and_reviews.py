@@ -1,4 +1,14 @@
 from app.reviews.parsing import REQUIRED_OUTPUT_METADATA_KEYS, VIOLATION_MISSING_QUOTE_EXCERPT, VIOLATION_TRUNCATED_OUTPUT
+from app.reviews.quality_telemetry import build_empty_review_quality_telemetry
+
+
+def _assert_quality_telemetry_contract(payload: dict) -> None:
+    expected = build_empty_review_quality_telemetry()
+    assert payload["total_comments"] >= 0
+    assert payload["fallback_count"] >= 0
+    assert payload["truncated_count"] >= 0
+    assert set(expected["violation_count_by_type"]).issubset(payload["violation_count_by_type"].keys())
+    assert isinstance(payload["per_persona"], dict)
 
 
 def test_comments_and_review_jobs(client, monkeypatch) -> None:
@@ -41,9 +51,17 @@ def test_comments_and_review_jobs(client, monkeypatch) -> None:
         headers=headers,
     )
     assert job_resp.status_code == 201
-    assert job_resp.json()["status"] == "queued"
-    assert job_resp.json()["provider"] in {"openai", "bedrock"}
-    assert isinstance(job_resp.json()["model"], str)
+    job_data = job_resp.json()
+    assert job_data["status"] == "queued"
+    assert job_data["provider"] in {"openai", "bedrock"}
+    assert isinstance(job_data["model"], str)
+    _assert_quality_telemetry_contract(job_data["quality_telemetry"])
+
+    list_jobs = client.get(f"/api/review-jobs?document_version_id={version_id}", headers=headers)
+    assert list_jobs.status_code == 200
+    jobs = list_jobs.json()
+    assert len(jobs) == 1
+    _assert_quality_telemetry_contract(jobs[0]["quality_telemetry"])
 
     comment_payload = {
         "persona_id": persona_id,
