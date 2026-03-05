@@ -34,6 +34,9 @@ class ReviewJobRead(BaseModel):
     trigger: str
     provider: str
     model: str
+    generation_index: int | None = Field(default=None, ge=1)
+    is_latest_for_version: bool | None = None
+    comment_count: int = Field(default=0, ge=0)
     quality_telemetry: ReviewJobQualitySummaryRead = Field(
         default_factory=lambda: ReviewJobQualitySummaryRead(**build_empty_review_quality_telemetry())
     )
