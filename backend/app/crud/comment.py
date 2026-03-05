@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app.db import models
+from app.reviews.parsing import normalize_comment_output_metadata
 from app.schemas.comment import CommentCreate
 
 
@@ -14,7 +15,7 @@ def create_comment(db: Session, tenant_id: str, data: CommentCreate) -> models.C
         start_offset=data.start_offset,
         end_offset=data.end_offset,
         excerpt=data.excerpt,
-        output_metadata=data.output_metadata or {},
+        output_metadata=normalize_comment_output_metadata(data.output_metadata),
     )
     db.add(comment)
     db.commit()
@@ -37,4 +38,7 @@ def list_comments_by_version(
     )
     if review_job_id is not None:
         query = query.filter(models.Comment.review_job_id == review_job_id)
-    return query.order_by(models.Comment.id.asc()).all()
+    comments = query.order_by(models.Comment.id.asc()).all()
+    for comment in comments:
+        comment.output_metadata = normalize_comment_output_metadata(comment.output_metadata)
+    return comments

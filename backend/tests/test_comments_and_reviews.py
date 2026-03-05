@@ -1,3 +1,6 @@
+from app.reviews.parsing import REQUIRED_OUTPUT_METADATA_KEYS, VIOLATION_MISSING_QUOTE_EXCERPT, VIOLATION_TRUNCATED_OUTPUT
+
+
 def test_comments_and_review_jobs(client, monkeypatch) -> None:
     def _noop_enqueue(job_id: int, tenant_id: str) -> None:
         return None
@@ -58,6 +61,73 @@ def test_comments_and_review_jobs(client, monkeypatch) -> None:
     )
     assert list_comments.status_code == 200
     assert len(list_comments.json()) == 1
+
+
+def test_comments_endpoint_normalizes_legacy_output_metadata(client, monkeypatch) -> None:
+    def _noop_enqueue(job_id: int, tenant_id: str) -> None:
+        return None
+
+    monkeypatch.setattr("app.api.review_jobs.enqueue_review_job", _noop_enqueue)
+    headers = {"X-Tenant-Id": "tenant-legacy-meta"}
+
+    persona_resp = client.post(
+        "/api/personas",
+        json={
+            "name": "Legacy Meta Persona",
+            "description": "legacy",
+            "system_prompt": "legacy",
+            "focus_areas": ["risk"],
+            "tone": "direct",
+            "is_active": True,
+            "group_id": None,
+        },
+        headers=headers,
+    )
+    assert persona_resp.status_code == 201
+    persona_id = persona_resp.json()["id"]
+
+    doc_resp = client.post("/api/documents", json={"title": "Legacy Doc"}, headers=headers)
+    assert doc_resp.status_code == 201
+    doc_id = doc_resp.json()["id"]
+
+    version_resp = client.post(
+        f"/api/documents/{doc_id}/versions",
+        json={"version_label": "v1", "content": "legacy content"},
+        headers=headers,
+    )
+    assert version_resp.status_code == 201
+    version_id = version_resp.json()["id"]
+
+    create_resp = client.post(
+        "/api/comments",
+        json={
+            "persona_id": persona_id,
+            "document_version_id": version_id,
+            "text": "Needs better structure.",
+            "start_offset": 0,
+            "end_offset": 5,
+            "excerpt": "legacy",
+            "output_metadata": {
+                "violations": ["missing_quote", "truncated"],
+                "legacy_field": "kept",
+                "truncated": 1,
+            },
+        },
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+
+    created_meta = create_resp.json()["output_metadata"]
+    assert set(REQUIRED_OUTPUT_METADATA_KEYS).issubset(created_meta.keys())
+    assert VIOLATION_MISSING_QUOTE_EXCERPT in created_meta["violations"]
+    assert VIOLATION_TRUNCATED_OUTPUT in created_meta["violations"]
+    assert created_meta["legacy_field"] == "kept"
+
+    listed = client.get(f"/api/comments?document_version_id={version_id}", headers=headers)
+    assert listed.status_code == 200
+    listed_meta = listed.json()[0]["output_metadata"]
+    assert set(REQUIRED_OUTPUT_METADATA_KEYS).issubset(listed_meta.keys())
+    assert listed_meta["legacy_field"] == "kept"
 
 
 def test_retry_failed_persona_endpoint(client, monkeypatch) -> None:

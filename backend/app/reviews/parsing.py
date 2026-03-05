@@ -12,6 +12,41 @@ DEFAULT_OUTPUT_REQUIREMENTS = {
     "include_severity": False,
 }
 
+VIOLATION_MISSING_QUOTE_EXCERPT = "missing_quote_excerpt"
+VIOLATION_MISSING_ACTIONABLE = "missing_actionable"
+VIOLATION_MISSING_SEVERITY = "missing_severity"
+VIOLATION_UNSTRUCTURED_OUTPUT = "unstructured_output"
+VIOLATION_TRUNCATED_OUTPUT = "truncated_output"
+VIOLATION_REVIEW_FAILED = "review_failed"
+
+CANONICAL_VIOLATION_TAXONOMY = (
+    VIOLATION_MISSING_QUOTE_EXCERPT,
+    VIOLATION_MISSING_ACTIONABLE,
+    VIOLATION_MISSING_SEVERITY,
+    VIOLATION_UNSTRUCTURED_OUTPUT,
+    VIOLATION_TRUNCATED_OUTPUT,
+    VIOLATION_REVIEW_FAILED,
+)
+
+REQUIRED_OUTPUT_METADATA_KEYS = (
+    "requirements",
+    "violations",
+    "used_fallback",
+    "truncated",
+)
+
+LEGACY_VIOLATION_ALIASES = {
+    "missing_quote": VIOLATION_MISSING_QUOTE_EXCERPT,
+    "missing_quote_text": VIOLATION_MISSING_QUOTE_EXCERPT,
+    "missing_action": VIOLATION_MISSING_ACTIONABLE,
+    "missing_severity_tag": VIOLATION_MISSING_SEVERITY,
+    "severity_missing": VIOLATION_MISSING_SEVERITY,
+    "unstructured": VIOLATION_UNSTRUCTURED_OUTPUT,
+    "truncated": VIOLATION_TRUNCATED_OUTPUT,
+    "failed_review": VIOLATION_REVIEW_FAILED,
+    "review_error": VIOLATION_REVIEW_FAILED,
+}
+
 SEVERITY_PATTERN = re.compile(r"^\s*\[(low|medium|high)\]", re.IGNORECASE)
 
 
@@ -39,6 +74,39 @@ def normalize_output_requirements(requirements: dict | None) -> dict:
     return normalized
 
 
+def normalize_comment_output_metadata(
+    output_metadata: dict | None,
+    output_requirements: dict | None = None,
+    *,
+    default_violations: list[str] | None = None,
+    default_used_fallback: bool = False,
+    default_truncated: bool = False,
+) -> dict:
+    normalized = dict(output_metadata) if isinstance(output_metadata, dict) else {}
+
+    requirements_source = normalized.get("requirements")
+    normalized["requirements"] = normalize_output_requirements(
+        requirements_source if isinstance(requirements_source, dict) else output_requirements
+    )
+
+    violations_source = normalized.get("violations")
+    if isinstance(violations_source, list):
+        violations = _normalize_violation_list(violations_source)
+    elif default_violations is not None:
+        violations = _normalize_violation_list(default_violations)
+    else:
+        violations = []
+
+    normalized["used_fallback"] = _coerce_bool(normalized.get("used_fallback"), default_used_fallback)
+    normalized["truncated"] = _coerce_bool(normalized.get("truncated"), default_truncated)
+
+    if normalized["truncated"] and VIOLATION_TRUNCATED_OUTPUT not in violations:
+        violations.append(VIOLATION_TRUNCATED_OUTPUT)
+
+    normalized["violations"] = violations
+    return normalized
+
+
 def parse_bullets(text: str) -> list[str]:
     bullets: list[str] = []
     for line in text.splitlines():
@@ -58,6 +126,8 @@ def parse_review_output(text: str, output_requirements: dict | None = None) -> l
     use_bullets = requirements["format"] == "bullet_list"
     used_fallback = False
     raw_items: list[str] = []
+    fallback_violations: list[str] = []
+
     if use_bullets:
         bullet_items: list[str] = []
         for line in text.splitlines():
@@ -73,6 +143,7 @@ def parse_review_output(text: str, output_requirements: dict | None = None) -> l
             if stripped:
                 raw_items = [stripped]
                 used_fallback = True
+                fallback_violations = [VIOLATION_UNSTRUCTURED_OUTPUT]
     else:
         stripped = text.strip()
         if stripped:
@@ -86,19 +157,23 @@ def parse_review_output(text: str, output_requirements: dict | None = None) -> l
 
     parsed: list[ParsedComment] = []
     for item in raw_items:
-        violations: list[str] = []
+        violations = list(fallback_violations)
         if requirements["require_quote_excerpt"] and not _has_quote_excerpt(item):
-            violations.append("missing_quote_excerpt")
+            violations.append(VIOLATION_MISSING_QUOTE_EXCERPT)
         if requirements["require_actionable"] and not _looks_actionable(item):
-            violations.append("missing_actionable")
+            violations.append(VIOLATION_MISSING_ACTIONABLE)
         if requirements["include_severity"] and not SEVERITY_PATTERN.search(item):
-            violations.append("missing_severity")
-        output_metadata = {
-            "requirements": requirements,
-            "violations": violations,
-            "used_fallback": used_fallback,
-            "truncated": truncated,
-        }
+            violations.append(VIOLATION_MISSING_SEVERITY)
+
+        output_metadata = normalize_comment_output_metadata(
+            {
+                "requirements": requirements,
+                "violations": violations,
+                "used_fallback": used_fallback,
+                "truncated": truncated,
+            },
+            requirements,
+        )
         parsed.append(ParsedComment(text=item, output_metadata=output_metadata))
     return parsed
 
@@ -149,8 +224,46 @@ def persist_comment_payloads(
         if not normalized:
             continue
         excerpt, start, end = extract_excerpt(content, normalized)
-        payloads.append((normalized, excerpt, start, end, comment.output_metadata))
+        payloads.append(
+            (
+                normalized,
+                excerpt,
+                start,
+                end,
+                normalize_comment_output_metadata(comment.output_metadata),
+            )
+        )
     return payloads
+
+
+def _normalize_violation_list(values: Iterable[object]) -> list[str]:
+    normalized: list[str] = []
+    for value in values:
+        if value is None:
+            continue
+        token = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+        if not token:
+            continue
+        token = LEGACY_VIOLATION_ALIASES.get(token, token)
+        if token not in normalized:
+            normalized.append(token)
+    return normalized
+
+
+def _coerce_bool(value: object, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if lowered in {"0", "false", "f", "no", "n", "off", ""}:
+            return False
+    return bool(value)
 
 
 def _has_quote_excerpt(comment: str) -> bool:
