@@ -10,7 +10,15 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout, as_completed
 from app.reviews.meta_reviewer import ensure_meta_review_run
-from app.reviews.parsing import parse_review_output, persist_comment_payloads, normalize_output_requirements, ParsedComment
+from app.reviews.parsing import (
+    ParsedComment,
+    VIOLATION_REVIEW_FAILED,
+    VIOLATION_UNSTRUCTURED_OUTPUT,
+    normalize_comment_output_metadata,
+    normalize_output_requirements,
+    parse_review_output,
+    persist_comment_payloads,
+)
 from app.reviews.prompt_builder import (
     build_persona_execution_spec,
     build_persona_execution_specs,
@@ -170,7 +178,7 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
                         text=f"Review failed: {exc}",
                         output_metadata={
                             "requirements": normalize_output_requirements(spec.get("output_requirements")),
-                            "violations": ["review_failed"],
+                            "violations": [VIOLATION_REVIEW_FAILED],
                             "used_fallback": True,
                             "truncated": False,
                         },
@@ -331,28 +339,12 @@ def _normalize_output_metadata(
     default_violations: list[str] | None = None,
     default_used_fallback: bool = False,
 ) -> dict:
-    normalized = dict(output_metadata) if isinstance(output_metadata, dict) else {}
-
-    requirement_source = normalized.get("requirements")
-    normalized["requirements"] = normalize_output_requirements(
-        requirement_source if isinstance(requirement_source, dict) else requirements
+    return normalize_comment_output_metadata(
+        output_metadata,
+        requirements,
+        default_violations=default_violations,
+        default_used_fallback=default_used_fallback,
     )
-
-    violations_value = normalized.get("violations")
-    if isinstance(violations_value, list):
-        normalized["violations"] = [
-            str(item).strip()
-            for item in violations_value
-            if item is not None and str(item).strip()
-        ]
-    elif default_violations is not None:
-        normalized["violations"] = default_violations
-    else:
-        normalized["violations"] = []
-
-    normalized["used_fallback"] = bool(normalized.get("used_fallback", default_used_fallback))
-    normalized["truncated"] = bool(normalized.get("truncated", False))
-    return normalized
 
 
 def _normalize_parsed_comments(raw_comments: list[ParsedComment] | list[str], output_requirements: dict | None) -> list[ParsedComment]:
@@ -378,7 +370,7 @@ def _normalize_parsed_comments(raw_comments: list[ParsedComment] | list[str], ou
                 output_metadata=_normalize_output_metadata(
                     None,
                     requirements,
-                    default_violations=["unstructured_output"],
+                    default_violations=[VIOLATION_UNSTRUCTURED_OUTPUT],
                     default_used_fallback=True,
                 ),
             )
@@ -476,7 +468,7 @@ def retry_failed_persona_in_job(
                     text=f"Review failed: {exc}",
                     output_metadata={
                         "requirements": normalize_output_requirements(spec.get("output_requirements")),
-                        "violations": ["review_failed"],
+                        "violations": [VIOLATION_REVIEW_FAILED],
                         "used_fallback": True,
                         "truncated": False,
                     },
