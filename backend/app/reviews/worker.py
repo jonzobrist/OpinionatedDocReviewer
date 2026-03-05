@@ -11,7 +11,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout, as_completed
 from app.reviews.meta_reviewer import ensure_meta_review_run
 from app.reviews.parsing import parse_review_output, persist_comment_payloads, normalize_output_requirements, ParsedComment
-from app.reviews.prompt_builder import build_persona_execution_spec, build_persona_execution_specs
+from app.reviews.prompt_builder import (
+    build_persona_execution_spec,
+    build_persona_execution_specs,
+    build_review_prompt,
+    trim_prompt_content,
+)
 from app.reviews.git_repo import ensure_repo
 from app.reviews.review_storage import write_review_and_commit
 from datetime import datetime, timezone
@@ -302,111 +307,21 @@ def build_prompt(
     output_requirements: dict | None = None,
     examples: list[str] | None = None,
 ) -> str:
-    clean_focus_areas = []
-    for item in focus_areas or []:
-        if item is None:
-            continue
-        text = str(item).strip()
-        if text:
-            clean_focus_areas.append(text)
-    focus = ", ".join(clean_focus_areas) if clean_focus_areas else "general quality"
-    voice = tone or "direct and constructive"
-    summary = description or ""
-    requirements = normalize_output_requirements(output_requirements)
-    max_bullets = requirements["max_bullets"]
-    include_severity = requirements["include_severity"]
-
-    sections = [
-        "You are a document review persona.",
-        f"Name: {name}",
-        f"Description: {summary}",
-        f"System prompt: {system_prompt or ''}",
-        f"Focus areas: {focus}",
-        f"Tone: {voice}",
-        "",
-        "Output requirements:",
-        f"- Format: {requirements['format']}",
-        f"- Max bullets: {max_bullets}",
-    ]
-    if requirements["require_quote_excerpt"]:
-        sections.append("- Each bullet must include an exact excerpt from the document in double quotes.")
-    if requirements["require_actionable"]:
-        sections.append("- Each bullet must include an actionable recommendation.")
-    if include_severity:
-        sections.append("- Prefix each bullet with a severity tag: [low], [medium], or [high].")
-
-    if requirements["format"] == "bullet_list":
-        example_prefix = "- [high] \"<exact excerpt>\" :: <actionable comment>" if include_severity else "- \"<exact excerpt>\" :: <actionable comment>"
-        sections.extend(
-            [
-                "Use Markdown bullets that start with '- '.",
-                f"Example: {example_prefix}",
-            ]
-        )
-    else:
-        sections.append("Provide a single response matching the required format above.")
-
-    if reference_notes:
-        truncated_notes, notes_truncated = _truncate_section(reference_notes, 2000)
-        sections.append("")
-        sections.append("Reference notes (always consider):")
-        sections.append(truncated_notes)
-        if notes_truncated:
-            sections.append("(Reference notes were truncated to 2000 characters.)")
-
-    if examples:
-        trimmed_examples, examples_truncated = _truncate_examples(examples, 3, 2000)
-        if trimmed_examples:
-            sections.append("")
-            sections.append("Examples:")
-            sections.extend(trimmed_examples)
-            if examples_truncated:
-                sections.append("(Examples were truncated to fit size limits.)")
-
-    sections.extend(
-        [
-            "",
-            "Document:",
-            content,
-        ]
+    return build_review_prompt(
+        name=name,
+        description=description,
+        system_prompt=system_prompt,
+        focus_areas=focus_areas,
+        tone=tone,
+        content=content,
+        reference_notes=reference_notes,
+        output_requirements=output_requirements,
+        examples=examples,
     )
-    return "\n".join(sections)
 
 
 def trim_content(content: str) -> str:
-    if settings.OPENAI_MAX_INPUT_CHARS <= 0:
-        return content
-    return content[: settings.OPENAI_MAX_INPUT_CHARS]
-
-
-def _truncate_section(text: str, max_chars: int) -> tuple[str, bool]:
-    if len(text) <= max_chars:
-        return text, False
-    return text[:max_chars].rstrip(), True
-
-
-def _truncate_examples(examples: list[str], max_count: int, max_total_chars: int) -> tuple[list[str], bool]:
-    trimmed: list[str] = []
-    total = 0
-    truncated = False
-    for example in examples[:max_count]:
-        if example is None:
-            continue
-        text = str(example).strip()
-        if not text:
-            continue
-        remaining = max_total_chars - total
-        if remaining <= 0:
-            truncated = True
-            break
-        if len(text) > remaining:
-            text = text[:remaining].rstrip()
-            truncated = True
-        total += len(text)
-        trimmed.append(f"- {text}")
-    if len(examples) > max_count:
-        truncated = True
-    return trimmed, truncated
+    return trim_prompt_content(content, settings.OPENAI_MAX_INPUT_CHARS)
 
 
 def _normalize_output_metadata(
