@@ -123,6 +123,20 @@ describe('page controls', () => {
         return json({ created: 1, updated: 0, renamed: 0, skipped: 0, errors: [] });
       }
       if (url.endsWith('/documents/library')) return json(documentLibraryPayload);
+      if (url.endsWith('/documents') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body || '{}'));
+        return json(
+          {
+            id: 303,
+            tenant_id: 'local-dev',
+            title: body.title ?? 'Uploaded Doc',
+            is_archived: false,
+            archived_at: null,
+            created_at: new Date().toISOString()
+          },
+          201
+        );
+      }
       if (url.endsWith('/documents')) return json([]);
       if (url.endsWith('/documents/101/history')) {
         return json([
@@ -134,6 +148,23 @@ describe('page controls', () => {
         ]);
       }
       if (url.includes('/review-jobs') && (!init?.method || init.method === 'GET')) {
+        const parsed = new URL(url, 'http://localhost');
+        const versionId = Number(parsed.searchParams.get('document_version_id') ?? '0');
+        if (versionId === 703) {
+          return json([
+            {
+              id: 888,
+              tenant_id: 'local-dev',
+              document_version_id: 703,
+              status: 'completed',
+              trigger: 'upload',
+              provider: 'openai',
+              model: 'gpt-4o-mini',
+              completed_at: new Date().toISOString(),
+              created_at: new Date().toISOString()
+            }
+          ]);
+        }
         return json([
           {
             id: 501,
@@ -149,13 +180,15 @@ describe('page controls', () => {
         ]);
       }
       if (url.endsWith('/review-jobs') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body || '{}'));
+        const versionId = Number(body.document_version_id ?? 401);
         return json(
           {
-            id: 777,
+            id: versionId === 703 ? 888 : 777,
             tenant_id: 'local-dev',
-            document_version_id: 401,
+            document_version_id: versionId,
             status: 'queued',
-            trigger: 'manual',
+            trigger: body.trigger ?? 'manual',
             provider: 'openai',
             model: 'gpt-4o-mini',
             completed_at: null,
@@ -176,6 +209,31 @@ describe('page controls', () => {
           }
         ]);
       }
+      if (url.endsWith('/documents/303/versions') && init?.method === 'POST') {
+        return json(
+          {
+            id: 703,
+            tenant_id: 'local-dev',
+            document_id: 303,
+            version_label: 'Initial upload',
+            content: '# Uploaded',
+            created_at: new Date().toISOString()
+          },
+          201
+        );
+      }
+      if (url.endsWith('/documents/303/versions')) {
+        return json([
+          {
+            id: 703,
+            tenant_id: 'local-dev',
+            document_id: 303,
+            version_label: 'Initial upload',
+            content: '# Uploaded',
+            created_at: new Date().toISOString()
+          }
+        ]);
+      }
       if (url.endsWith('/documents/202/versions')) {
         return json([
           {
@@ -189,6 +247,9 @@ describe('page controls', () => {
         ]);
       }
       if (url.includes('/comments?document_version_id=401&review_job_id=501')) {
+        return json([]);
+      }
+      if (url.includes('/comments?document_version_id=703')) {
         return json([]);
       }
       if (url.includes('/comments?document_version_id=401') && !url.includes('review_job_id=')) {
@@ -925,6 +986,47 @@ describe('page controls', () => {
     ).toBe(true);
   });
 
+  it('updates URL immediately after upload and restores uploaded context from URL', async () => {
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams();
+    render(<HomePage />);
+
+    const uploadInput = document.querySelector(
+      'input[type="file"][accept=".md,.markdown,.txt,text/markdown,text/plain"]'
+    );
+    expect(uploadInput).toBeTruthy();
+
+    replaceMock.mockClear();
+    const uploadFile = {
+      name: 'uploaded.md',
+      text: async () => '# Uploaded\n\nBody'
+    };
+    fireEvent.change(uploadInput as HTMLInputElement, { target: { files: [uploadFile] } });
+
+    await waitFor(() => {
+      const urls = replaceMock.mock.calls.map((call) => String(call[0]));
+      expect(urls.some((url) => url.includes('doc=303'))).toBe(true);
+    });
+
+    (global.fetch as unknown as ReturnType<typeof vi.fn>).mockClear();
+    cleanup();
+
+    mockPathname = '/';
+    mockSearchParams = new URLSearchParams('doc=303');
+    render(<HomePage />);
+
+    expect(
+      await screen.findByText('No meta directives found for this run yet. Showing individual reviewer comments.')
+    ).toBeTruthy();
+
+    await waitFor(() => {
+      const calls = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((args) =>
+        String(args[0])
+      );
+      expect(calls.some((url) => url.includes('/documents/303/versions'))).toBe(true);
+    });
+  });
+
   it('saves system settings to localStorage', async () => {
     mockPathname = '/system';
     render(<HomePage />);
@@ -1000,7 +1102,7 @@ describe('page controls', () => {
     expect(await screen.findByText(/Import complete:/i)).toBeTruthy();
   });
 
-  it('imports review bundle from library', async () => {
+  it('imports review bundle from library and updates URL to imported document context', async () => {
     mockPathname = '/library';
     render(<HomePage />);
 
@@ -1025,8 +1127,13 @@ describe('page controls', () => {
           ]
         })
     };
+    replaceMock.mockClear();
     fireEvent.change(importInput as HTMLInputElement, { target: { files: [bundle] } });
 
     await screen.findByText(/Imported 1 review bundle/i);
+    await waitFor(() => {
+      const urls = replaceMock.mock.calls.map((call) => String(call[0]));
+      expect(urls.some((url) => url.includes('doc=202'))).toBe(true);
+    });
   });
 });

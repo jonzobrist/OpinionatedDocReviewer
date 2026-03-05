@@ -1147,6 +1147,14 @@ function HomePageContent() {
     }
   }
 
+  function navigateToDocumentContext(documentId: number) {
+    const nextParams = new URLSearchParams(latestSearchParamsKeyRef.current);
+    nextParams.set('doc', String(documentId));
+    nextParams.delete('run');
+    const nextQuery = nextParams.toString();
+    router.replace(nextQuery ? `/?${nextQuery}` : '/');
+  }
+
   async function handleUploadFiles(files: FileList | File[]) {
     if (!files || files.length === 0) return;
     setIsUploading(true);
@@ -1199,6 +1207,7 @@ function HomePageContent() {
     }
     if (lastDocId) {
       setSelectedDocumentId(lastDocId);
+      navigateToDocumentContext(lastDocId);
       await loadVersions(lastDocId);
     }
     if (lastVersionId) {
@@ -2767,6 +2776,7 @@ function HomePageContent() {
     setErrorMessage(null);
     try {
       let importedCount = 0;
+      let lastImportedDocumentId: number | null = null;
       for (const file of list) {
         const filename = file.name.toLowerCase();
         let payload: unknown = null;
@@ -2820,8 +2830,12 @@ function HomePageContent() {
           body: JSON.stringify(payload)
         });
         importedCount += 1;
+        lastImportedDocumentId = result.document_id;
         setSelectedDocumentId(result.document_id);
         await loadVersions(result.document_id);
+      }
+      if (lastImportedDocumentId) {
+        navigateToDocumentContext(lastImportedDocumentId);
       }
       await refreshAll();
       setStatusMessage(`Imported ${importedCount} review bundle${importedCount === 1 ? '' : 's'}.`);
