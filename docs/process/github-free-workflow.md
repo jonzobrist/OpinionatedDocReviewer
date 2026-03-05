@@ -1,6 +1,6 @@
 # GitHub Free Work Management Model for OpinionatedDocReviewer
 
-Last updated: 2026-03-01
+Last updated: 2026-03-04
 
 ## Scope
 This model uses only **GitHub Free-compatible** capabilities (Issues, Milestones, Projects, Actions, templates, CODEOWNERS, basic branch governance).
@@ -196,6 +196,33 @@ Use GitHub Actions (free minutes permitting):
 3. **Stale management** (warn then close stale issues/PRs with exemptions)
 4. **PR size labeler** (`size:xs/s/m/l/xl`) for review load balancing
 5. **Release note draft job** from merged PR labels and milestone
+6. **Stalled-lane watchdog escalation** (hourly scan + concise `WATCHDOG:` nudge on likely deadlocks)
+
+### Stalled-lane watchdog (`.github/workflows/stalled-lane-watchdog.yml`)
+
+Purpose: detect likely execution stalls early and recommend the next action without hard-enforcing closures/merges.
+
+Implementation:
+- Workflow: `/.github/workflows/stalled-lane-watchdog.yml`
+- Script: `/scripts/github/stalled_lane_watchdog.py`
+- Comment marker: `WATCHDOG:` prefix + hidden marker for idempotency.
+
+Default thresholds (tunable constants in script or env overrides):
+- Rule A: issue with `state:in-progress` idle `> 8h`
+- Rule B: open PR with green checks + `reviewDecision=REVIEW_REQUIRED` idle `> 2h`
+- Rule C: open PR with review comments/threads and no new activity idle `> 8h`
+- Anti-spam cooldown: no repeat watchdog comment on the same target within `24h`
+
+Tuning knobs (environment variables):
+- `WATCHDOG_RULE_A_HOURS`
+- `WATCHDOG_RULE_B_HOURS`
+- `WATCHDOG_RULE_C_HOURS`
+- `WATCHDOG_COMMENT_COOLDOWN_HOURS`
+
+Noise controls:
+- Scheduled hourly for timely but bounded nudges.
+- Supports `workflow_dispatch` dry-run mode for safe validation.
+- Easy rollback: disable/delete workflow file.
 
 None of the above require paid GitHub plans.
 
