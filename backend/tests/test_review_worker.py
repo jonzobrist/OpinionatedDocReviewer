@@ -3,10 +3,13 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
+
 from app.db import models
 from app.db.init_db import seed_default_personas
 from app.db.session import SessionLocal
 from app.reviews.parsing import (
+    REQUIRED_OUTPUT_METADATA_KEYS,
     ParsedComment,
     VIOLATION_MISSING_ACTIONABLE,
     VIOLATION_MISSING_QUOTE_EXCERPT,
@@ -800,8 +803,17 @@ def test_meta_auto_trigger_is_idempotent_for_duplicate_completion_events(monkeyp
         db.close()
 
 
+def _assert_review_failed_metadata_contract(output_metadata: dict, output_requirements: dict | None) -> None:
+    assert set(REQUIRED_OUTPUT_METADATA_KEYS).issubset(output_metadata.keys())
+    assert output_metadata["requirements"] == normalize_output_requirements(output_requirements)
+    assert output_metadata["violations"] == [VIOLATION_REVIEW_FAILED]
+    assert output_metadata["used_fallback"] is True
+    assert output_metadata["truncated"] is False
+
+
 def test_generate_with_timeout_retry_retries_on_timeout(monkeypatch) -> None:
     calls = {"count": 0}
+    sleep_calls: list[int] = []
 
     def _fake_generate(_prompt: str) -> str:
         calls["count"] += 1
@@ -810,7 +822,142 @@ def test_generate_with_timeout_retry_retries_on_timeout(monkeypatch) -> None:
         return "- \"a\" :: ok"
 
     monkeypatch.setattr("app.reviews.worker.generate_completion", _fake_generate)
-    monkeypatch.setattr("app.reviews.worker.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("app.reviews.worker.time.sleep", lambda seconds: sleep_calls.append(seconds))
     output = _generate_with_timeout_retry("prompt")
     assert output == '- "a" :: ok'
     assert calls["count"] == 3
+    assert sleep_calls == [1, 2]
+
+
+def test_generate_with_timeout_retry_raises_after_max_attempts_with_backoff(monkeypatch) -> None:
+    calls = {"count": 0}
+    sleep_calls: list[int] = []
+
+    def _always_timeout(_prompt: str) -> str:
+        calls["count"] += 1
+        raise TimeoutError("request timed out")
+
+    monkeypatch.setattr("app.reviews.worker.generate_completion", _always_timeout)
+    monkeypatch.setattr("app.reviews.worker.time.sleep", lambda seconds: sleep_calls.append(seconds))
+
+    with pytest.raises(TimeoutError, match="timed out after 3 attempts"):
+        _generate_with_timeout_retry("prompt")
+
+    assert calls["count"] == 3
+    assert sleep_calls == [1, 2]
+
+
+def test_generate_with_timeout_retry_does_not_retry_non_timeout_provider_error(monkeypatch) -> None:
+    calls = {"count": 0}
+    sleep_calls: list[int] = []
+
+    def _provider_failure(_prompt: str) -> str:
+        calls["count"] += 1
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr("app.reviews.worker.generate_completion", _provider_failure)
+    monkeypatch.setattr("app.reviews.worker.time.sleep", lambda seconds: sleep_calls.append(seconds))
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        _generate_with_timeout_retry("prompt")
+
+    assert calls["count"] == 1
+    assert sleep_calls == []
+
+
+def test_run_review_job_timeout_path_persists_deterministic_fallback_comment(monkeypatch) -> None:
+    db = SessionLocal()
+    try:
+        tenant_id = f"tenant-test-timeout-fallback-{uuid4().hex}"
+        monkeypatch.setattr("app.reviews.worker.settings.DOC_REPO_ENABLED", False)
+        monkeypatch.setattr("app.reviews.worker.settings.META_AUTO_SYNTHESIS_ENABLED", False)
+
+        _version, job = _seed_review_context_without_personas(db, tenant_id)
+        persona = _create_persona(db, tenant_id, name="Timeout Persona", sort_order=10)
+
+        calls = {"count": 0}
+        sleep_calls: list[int] = []
+
+        def _always_timeout(_prompt: str) -> str:
+            calls["count"] += 1
+            raise TimeoutError("request timed out")
+
+        monkeypatch.setattr("app.reviews.worker.generate_completion", _always_timeout)
+        monkeypatch.setattr("app.reviews.worker.time.sleep", lambda seconds: sleep_calls.append(seconds))
+
+        run_review_job(job.id, tenant_id)
+
+        db.refresh(job)
+        assert job.status == "completed"
+
+        comments = (
+            db.query(models.Comment)
+            .filter(
+                models.Comment.tenant_id == tenant_id,
+                models.Comment.review_job_id == job.id,
+                models.Comment.persona_id == persona.id,
+            )
+            .all()
+        )
+        assert len(comments) == 1
+        assert comments[0].text.startswith("Review failed: ")
+        _assert_review_failed_metadata_contract(comments[0].output_metadata, persona.output_requirements)
+
+        assert calls["count"] == 3
+        assert sleep_calls == [1, 2]
+
+        telemetry = job.quality_telemetry
+        assert telemetry["total_comments"] == 1
+        assert telemetry["fallback_count"] == 1
+        assert telemetry["violation_count_by_type"][VIOLATION_REVIEW_FAILED] == 1
+    finally:
+        db.close()
+
+
+def test_run_review_job_provider_failure_path_persists_deterministic_fallback_comment(monkeypatch) -> None:
+    db = SessionLocal()
+    try:
+        tenant_id = f"tenant-test-provider-fallback-{uuid4().hex}"
+        monkeypatch.setattr("app.reviews.worker.settings.DOC_REPO_ENABLED", False)
+        monkeypatch.setattr("app.reviews.worker.settings.META_AUTO_SYNTHESIS_ENABLED", False)
+
+        _version, job = _seed_review_context_without_personas(db, tenant_id)
+        persona = _create_persona(db, tenant_id, name="Provider Failure Persona", sort_order=10)
+
+        calls = {"count": 0}
+        sleep_calls: list[int] = []
+
+        def _provider_failure(_prompt: str) -> str:
+            calls["count"] += 1
+            raise RuntimeError("provider unavailable")
+
+        monkeypatch.setattr("app.reviews.worker.generate_completion", _provider_failure)
+        monkeypatch.setattr("app.reviews.worker.time.sleep", lambda seconds: sleep_calls.append(seconds))
+
+        run_review_job(job.id, tenant_id)
+
+        db.refresh(job)
+        assert job.status == "completed"
+
+        comments = (
+            db.query(models.Comment)
+            .filter(
+                models.Comment.tenant_id == tenant_id,
+                models.Comment.review_job_id == job.id,
+                models.Comment.persona_id == persona.id,
+            )
+            .all()
+        )
+        assert len(comments) == 1
+        assert comments[0].text.startswith("Review failed: provider unavailable")
+        _assert_review_failed_metadata_contract(comments[0].output_metadata, persona.output_requirements)
+
+        assert calls["count"] == 1
+        assert sleep_calls == []
+
+        telemetry = job.quality_telemetry
+        assert telemetry["total_comments"] == 1
+        assert telemetry["fallback_count"] == 1
+        assert telemetry["violation_count_by_type"][VIOLATION_REVIEW_FAILED] == 1
+    finally:
+        db.close()
