@@ -268,9 +268,57 @@ function HomePageContent() {
     () => versions.find((version) => version.id === selectedVersionId) ?? null,
     [versions, selectedVersionId]
   );
+  const reviewGenerationOptions = useMemo(() => {
+    if (reviewJobs.length === 0) return [];
+
+    const jobsById = [...reviewJobs].sort((a, b) => a.id - b.id);
+    const generationByJobId = new Map<number, number>();
+    let fallbackGeneration = 0;
+
+    for (const job of jobsById) {
+      const generationFromApi = normalizeGenerationIndex(job.generation_index);
+      if (generationFromApi !== null) {
+        fallbackGeneration = Math.max(fallbackGeneration, generationFromApi);
+        generationByJobId.set(job.id, generationFromApi);
+      } else {
+        fallbackGeneration += 1;
+        generationByJobId.set(job.id, fallbackGeneration);
+      }
+    }
+
+    const latestGeneration = jobsById.reduce((latest, job) => {
+      return Math.max(latest, generationByJobId.get(job.id) ?? 0);
+    }, 0);
+
+    return reviewJobs
+      .map((job) => {
+        const generation = generationByJobId.get(job.id) ?? 1;
+        const isLatest =
+          typeof job.is_latest_for_version === 'boolean'
+            ? job.is_latest_for_version
+            : generation === latestGeneration;
+        const commentCount = Number.isInteger(job.comment_count) ? Number(job.comment_count) : null;
+        const commentLabel =
+          commentCount === null
+            ? ''
+            : ` · ${commentCount} comment${commentCount === 1 ? '' : 's'}`;
+        return {
+          job,
+          generation,
+          isLatest,
+          label: `v${generation}${isLatest ? ' (latest)' : ''} · run #${job.id} · ${job.status}${commentLabel}`
+        };
+      })
+      .sort((a, b) => b.generation - a.generation || b.job.id - a.job.id);
+  }, [reviewJobs]);
+
   const selectedReviewJob = useMemo(
     () => reviewJobs.find((job) => job.id === selectedReviewJobId) ?? null,
     [reviewJobs, selectedReviewJobId]
+  );
+  const selectedReviewGeneration = useMemo(
+    () => reviewGenerationOptions.find((entry) => entry.job.id === selectedReviewJobId) ?? null,
+    [reviewGenerationOptions, selectedReviewJobId]
   );
   const editingPersona = useMemo(
     () => personas.find((persona) => persona.id === editingPersonaId) ?? null,
@@ -748,10 +796,7 @@ function HomePageContent() {
     try {
       const jobs = await apiFetch<ReviewJobRead[]>(`/review-jobs?document_version_id=${versionId}`);
       setReviewJobs(jobs);
-      const latestCompleted = [...jobs]
-        .reverse()
-        .find((job) => job.status === 'completed' && Boolean(job.completed_at));
-      const preferred = latestCompleted ?? (jobs.length > 0 ? jobs[jobs.length - 1] : null);
+      const preferred = pickLatestReviewGenerationJob(jobs);
       setSelectedReviewJobId(preferred?.id ?? null);
       if (preferred) {
         const data = await loadComments(versionId, false, preferred.id);
@@ -782,8 +827,8 @@ function HomePageContent() {
       const selectedExists =
         currentSelected !== null && jobs.some((job) => job.id === currentSelected);
       if (!selectedExists) {
-        const latest = jobs[jobs.length - 1];
-        nextSelected = latest?.id ?? null;
+        const latestGeneration = pickLatestReviewGenerationJob(jobs);
+        nextSelected = latestGeneration?.id ?? null;
         setSelectedReviewJobId(nextSelected);
       }
       const running = jobs.some((job) => job.status === 'queued' || job.status === 'running');
@@ -795,6 +840,28 @@ function HomePageContent() {
       // Snapshot polling should not surface transient errors in the primary UI flow.
       return { jobs: [], selectedId: currentSelected };
     }
+  }
+
+  async function handleSelectReviewGeneration(reviewJobId: number) {
+    if (!selectedVersion) return;
+    const nextReviewJob = reviewJobs.find((job) => job.id === reviewJobId) ?? null;
+
+    setSelectedReviewJobId(reviewJobId);
+    setFocusedCommentId(null);
+    setHoveredCommentId(null);
+    setRecentCommentIds(new Set());
+
+    const scoped = await loadComments(selectedVersion.id, false, reviewJobId);
+    const generationLabel =
+      nextReviewJob?.generation_index && nextReviewJob.generation_index > 0
+        ? `v${nextReviewJob.generation_index}`
+        : `run #${reviewJobId}`;
+
+    setStatusMessage(
+      scoped.length > 0
+        ? `Showing ${scoped.length} comments for ${generationLabel}.`
+        : `No comments available yet for ${generationLabel}.`
+    );
   }
 
   async function handleRefreshCurrentComments() {
@@ -2968,7 +3035,7 @@ function HomePageContent() {
                 <div className="doc-meta">
                   {visibleComments.length} comments · {enabledPersonas.size} active agents
                   {selectedReviewJob
-                    ? ` · run #${selectedReviewJob.id} ${selectedReviewJob.status} (${selectedReviewJob.provider}/${selectedReviewJob.model})`
+                    ? ` · ${selectedReviewGeneration ? `v${selectedReviewGeneration.generation} ` : ''}run #${selectedReviewJob.id} ${selectedReviewJob.status} (${selectedReviewJob.provider}/${selectedReviewJob.model})${Number.isInteger(selectedReviewJob.comment_count) ? ` · ${selectedReviewJob.comment_count} comments` : ''}`
                     : ''}
                 </div>
               </div>
@@ -2991,6 +3058,12 @@ function HomePageContent() {
                 </div>
                 <span className="pill">{systemStatus?.redis.ok ? 'Live' : 'Paused'}</span>
                 <span className="pill">{selectedVersion.version_label}</span>
+                {selectedReviewGeneration && (
+                  <span className="pill">
+                    v{selectedReviewGeneration.generation}
+                    {selectedReviewGeneration.isLatest ? ' latest' : ''}
+                  </span>
+                )}
                 {selectedReviewJob && (
                   <span className="pill">
                     {selectedReviewJob.status === 'running' || selectedReviewJob.status === 'queued'
@@ -3127,6 +3200,24 @@ function HomePageContent() {
                     Meta
                   </button>
                 </div>
+                {reviewGenerationOptions.length > 1 && (
+                  <select
+                    aria-label="Review generation"
+                    className="input compact"
+                    value={selectedReviewJobId ?? reviewGenerationOptions[0]?.job.id ?? ''}
+                    onChange={(event) => {
+                      const nextReviewJobId = Number(event.target.value);
+                      if (!Number.isInteger(nextReviewJobId) || nextReviewJobId <= 0) return;
+                      void handleSelectReviewGeneration(nextReviewJobId);
+                    }}
+                  >
+                    {reviewGenerationOptions.map((entry) => (
+                      <option key={entry.job.id} value={entry.job.id}>
+                        {entry.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 {commentViewMode === 'meta' && (
                   <>
                     <select
@@ -5422,6 +5513,41 @@ function isMetaSynthesisFailedStatus(status: string | null | undefined): boolean
   if (!status) return false;
   const normalized = status.trim().toLowerCase();
   return normalized === 'failed' || normalized === 'error';
+}
+
+function normalizeGenerationIndex(value: number | null | undefined): number | null {
+  if (!Number.isInteger(value) || Number(value) <= 0) return null;
+  return Number(value);
+}
+
+function pickLatestReviewGenerationJob(jobs: ReviewJobRead[]): ReviewJobRead | null {
+  if (jobs.length === 0) return null;
+
+  const flaggedLatest = jobs
+    .filter((job) => job.is_latest_for_version === true)
+    .sort((a, b) => {
+      const aGeneration = normalizeGenerationIndex(a.generation_index) ?? 0;
+      const bGeneration = normalizeGenerationIndex(b.generation_index) ?? 0;
+      if (aGeneration !== bGeneration) return bGeneration - aGeneration;
+      return b.id - a.id;
+    })[0];
+  if (flaggedLatest) return flaggedLatest;
+
+  const highestGeneration = jobs
+    .slice()
+    .sort((a, b) => {
+      const aGeneration = normalizeGenerationIndex(a.generation_index) ?? 0;
+      const bGeneration = normalizeGenerationIndex(b.generation_index) ?? 0;
+      if (aGeneration !== bGeneration) return bGeneration - aGeneration;
+      return b.id - a.id;
+    })[0];
+  if ((normalizeGenerationIndex(highestGeneration?.generation_index) ?? 0) > 0) {
+    return highestGeneration ?? null;
+  }
+
+  return jobs
+    .slice()
+    .sort((a, b) => b.id - a.id)[0] ?? null;
 }
 
 function metaStatusPollDelayForAttempt(attempt: number): number {
