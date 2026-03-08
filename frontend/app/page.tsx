@@ -2707,6 +2707,22 @@ function HomePageContent() {
             model: runForBundle.model,
             error_message: runForBundle.error_message,
             created_at: runForBundle.created_at,
+            summary: runForBundle.summary
+              ? {
+                  verdict: runForBundle.summary.verdict,
+                  attention_points: runForBundle.summary.attention_points.map((point) => ({
+                    meta_comment_id: point.meta_comment_id,
+                    location: point.location,
+                    reason: point.reason,
+                    priority: point.priority,
+                    start_offset: point.start_offset,
+                    end_offset: point.end_offset,
+                    source_comment_ids: point.source_comment_ids
+                  })),
+                  clean_sections: runForBundle.summary.clean_sections,
+                  clean_statement: runForBundle.summary.clean_statement
+                }
+              : null,
             comments: runForBundle.comments.map((metaComment) => ({
               content: metaComment.content,
               category: metaComment.category,

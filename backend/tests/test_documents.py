@@ -136,6 +136,22 @@ def test_import_review_bundle_restores_comments_and_meta(client) -> None:
             "is_synthesized": True,
             "provider": "openai",
             "model": "gpt-4o-mini",
+            "summary": {
+                "verdict": "review_needed",
+                "attention_points": [
+                    {
+                        "meta_comment_id": 1,
+                        "location": "Paragraph 1",
+                        "reason": "Tighten intro",
+                        "priority": "medium",
+                        "start_offset": 0,
+                        "end_offset": 5,
+                        "source_comment_ids": [1001],
+                    }
+                ],
+                "clean_sections": [],
+                "clean_statement": "No section is clean enough to skip yet.",
+            },
             "comments": [
                 {
                     "content": "Tighten intro",
