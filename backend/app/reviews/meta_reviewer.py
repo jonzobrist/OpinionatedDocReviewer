@@ -36,6 +36,7 @@ CRITICAL_HINTS = (
 GROUP_ADJACENCY_CHARS = 120
 MAX_META_COMMENTS_INPUT = 2000
 MAX_META_GROUPS = 500
+MAX_META_ATTENTION_POINTS = 5
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 PRIORITY_SCORE = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
@@ -209,11 +210,15 @@ def _build_prompt(group: CommentGroup, persona_map: dict[int, models.Persona], d
         "Return ONLY a valid JSON array; no markdown; no prose.\n"
         "Each item must include keys exactly: content, category, priority, impact, effort, confidence, why_now, recommended_change, verification_step, status, assignee, due_at, contributing_reviewers, location.\n"
         "Rules:\n"
-        "- 1-2 sentences max, imperative action; no hedging.\n"
+        "- content must be one sentence, under 160 characters, and describe the document issue at this location only.\n"
+        "- Do not summarize reviewer comments or mention reviewers in content.\n"
+        "- Be specific about the document problem and why it needs attention now.\n"
+        "- Return at most 1 directive for this location unless there are clearly separate issues.\n"
         "- Collapse duplicates into one directive.\n"
         "- Preserve minority critical/security issues even if only one reviewer raised them.\n"
         "- If reviewers conflict, state conflict briefly and pick stronger recommendation.\n"
         "- Omit non-actionable/noise comments.\n"
+        "- Set why_now, recommended_change, verification_step, assignee, due_at to null unless essential.\n"
         "- category: structure|clarity|technical|security|accessibility|style\n"
         "- priority: critical|high|medium|low\n"
         "- impact: high|medium|low\n"
@@ -420,15 +425,16 @@ def synthesize_group(
     joined = " | ".join(comment.text.strip() for comment in group.comments if comment.text.strip())
     if not joined:
         return [], False
+    primary = next((comment.text.strip() for comment in group.comments if comment.text.strip()), "")
     fallback = {
-        "content": joined,
+        "content": primary or joined,
         "category": "clarity",
         "priority": "medium",
         "impact": "medium",
         "effort": "medium",
         "confidence": 0.5,
         "why_now": None,
-        "recommended_change": joined,
+        "recommended_change": None,
         "verification_step": "Confirm the updated text addresses all cited reviewer concerns.",
         "status": "open",
         "assignee": None,
@@ -779,7 +785,7 @@ def ensure_meta_review_run(
                 )
                 order_index += 1
 
-        deduped = dedupe_directives(candidates)
+        deduped = dedupe_directives(candidates)[:MAX_META_ATTENTION_POINTS]
 
         for candidate in deduped:
             meta_comment = models.MetaComment(
