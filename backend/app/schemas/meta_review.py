@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 MetaReviewStatus = Literal["queued", "running", "completed", "failed"]
 MetaReviewResolution = Literal["reused", "created"]
+MetaReviewVerdict = Literal["clean", "review_needed", "problems"]
 
 
 class MetaReviewCreate(BaseModel):
@@ -61,6 +62,23 @@ class MetaCommentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MetaAttentionPointRead(BaseModel):
+    meta_comment_id: int
+    location: str
+    reason: str
+    priority: str
+    start_offset: int
+    end_offset: int
+    source_comment_ids: list[int] = Field(default_factory=list)
+
+
+class MetaReviewSummaryRead(BaseModel):
+    verdict: MetaReviewVerdict
+    attention_points: list[MetaAttentionPointRead] = Field(default_factory=list)
+    clean_sections: list[str] = Field(default_factory=list)
+    clean_statement: str
+
+
 class MetaReviewRunRead(BaseModel):
     id: int
     tenant_id: str
@@ -80,6 +98,7 @@ class MetaReviewRunRead(BaseModel):
     error_details: MetaReviewErrorDetailRead | None = None
     created_at: datetime
     comments: list[MetaCommentRead]
+    summary: MetaReviewSummaryRead | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

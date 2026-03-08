@@ -285,6 +285,22 @@ describe('page controls', () => {
             model: 'gpt-4o-mini',
             error_message: null,
             created_at: new Date().toISOString(),
+            summary: {
+              verdict: 'problems',
+              attention_points: [
+                {
+                  meta_comment_id: 9501,
+                  location: 'Opening, paragraph 1',
+                  reason: 'Clarify the opening section to reduce ambiguity.',
+                  priority: 'high',
+                  start_offset: 0,
+                  end_offset: 10,
+                  source_comment_ids: [601]
+                }
+              ],
+              clean_sections: [],
+              clean_statement: 'No section is clean enough to skip yet.'
+            },
             comments: [
               {
                 id: 9501,
@@ -330,6 +346,7 @@ describe('page controls', () => {
             model: 'gpt-4o-mini',
             error_message: null,
             created_at: new Date().toISOString(),
+            summary: null,
             comments: []
           });
         const asFailed = () =>
@@ -345,6 +362,7 @@ describe('page controls', () => {
             model: 'gpt-4o-mini',
             error_message: 'Provider timeout',
             created_at: new Date().toISOString(),
+            summary: null,
             comments: []
           });
 
@@ -372,6 +390,7 @@ describe('page controls', () => {
               model: 'gpt-4o-mini',
               error_message: null,
               created_at: new Date().toISOString(),
+              summary: null,
               comments: []
             });
           }
@@ -407,6 +426,12 @@ describe('page controls', () => {
             model: 'gpt-4o-mini',
             error_message: null,
             created_at: new Date().toISOString(),
+            summary: {
+              verdict: 'clean',
+              attention_points: [],
+              clean_sections: ['Entire document'],
+              clean_statement: 'Entire document is clean — no significant issues found.'
+            },
             comments: []
           },
           201
@@ -710,7 +735,10 @@ describe('page controls', () => {
     mockSearchParams = new URLSearchParams('doc=101');
     render(<HomePage />);
 
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
+    expect(await screen.findByText('Problems')).toBeTruthy();
+    expect(await screen.findByText('Top attention points')).toBeTruthy();
+    expect(await screen.findByText('What is fine')).toBeTruthy();
     expect(await screen.findByText('Clarify the opening section to reduce ambiguity.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
   });
@@ -721,7 +749,7 @@ describe('page controls', () => {
     mockSearchParams = new URLSearchParams('doc=101');
     render(<HomePage />);
 
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     expect(await screen.findByText('Unable to load meta directives right now.')).toBeTruthy();
     expect(await screen.findByText('Meta synthesis failed: Provider timeout')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
@@ -733,7 +761,7 @@ describe('page controls', () => {
     mockSearchParams = new URLSearchParams('doc=101');
     render(<HomePage />);
 
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     expect(await screen.findByText('Meta directives are still being synthesized…')).toBeTruthy();
     expect(await screen.findByText('Meta directives are still being synthesized.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
@@ -797,6 +825,7 @@ describe('page controls', () => {
     fireEvent.click(recompute);
 
     expect(await screen.findByText('No meta directives produced for this version.')).toBeTruthy();
+    expect(await screen.findByText('Clean')).toBeTruthy();
     expect(await screen.findByText('No significant issues found.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
 
@@ -827,13 +856,14 @@ describe('page controls', () => {
     ).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Meta' }));
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     expect(
       await screen.findAllByText('No meta directives available for this run yet. Recompute to synthesize now.')
     ).toHaveLength(2);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Recompute' }));
     expect(await screen.findByText('No meta directives produced for this version.')).toBeTruthy();
+    expect(await screen.findByText('Clean')).toBeTruthy();
     expect(await screen.findByText('No significant issues found.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
   });
@@ -852,7 +882,7 @@ describe('page controls', () => {
     ).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Meta' }));
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     expect(
       (
         await screen.findAllByText(
@@ -883,7 +913,7 @@ describe('page controls', () => {
     mockSearchParams = new URLSearchParams('doc=101&mode=meta&directive=9501');
     render(<HomePage />);
 
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     await waitFor(() => {
       expect(document.querySelector('.comment-card[data-meta-id="9501"].selected')).toBeTruthy();
     });
@@ -914,7 +944,7 @@ describe('page controls', () => {
     mockSearchParams = new URLSearchParams('doc=101&mode=meta&directive=9999');
     render(<HomePage />);
 
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     expect(await screen.findByText('Requested directive #9999 is not available for this run.')).toBeTruthy();
 
     await waitFor(() => {
@@ -929,7 +959,7 @@ describe('page controls', () => {
     mockSearchParams = new URLSearchParams('doc=101&mode=meta&directive=9501');
     render(<HomePage />);
 
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     fireEvent.click((await screen.findAllByText('Show sources (1)'))[0]);
     expect(await screen.findByText('Anchor excerpt: “Design”')).toBeTruthy();
 
@@ -955,7 +985,7 @@ describe('page controls', () => {
     mockSearchParams = new URLSearchParams('doc=101');
     render(<HomePage />);
 
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
 
     fireEvent.click((await screen.findAllByText('Show sources (1)'))[0]);
@@ -963,7 +993,7 @@ describe('page controls', () => {
     expect(await screen.findByRole('button', { name: 'Refresh' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Meta' }));
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     expect(await screen.findByText('Clarify the opening section to reduce ambiguity.')).toBeTruthy();
   });
 
