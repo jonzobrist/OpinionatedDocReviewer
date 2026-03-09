@@ -3531,7 +3531,7 @@ function HomePageContent() {
                   <div className="empty-feed">
                     {(metaReviewRun?.comments.length ?? 0) > 0
                       ? 'No attention points match this category filter.'
-                      : 'No significant issues found.'}
+                      : 'No attention points were raised.'}
                   </div>
                 )}
               {commentViewMode === 'meta' &&
