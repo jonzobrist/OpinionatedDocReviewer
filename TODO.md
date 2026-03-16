@@ -62,13 +62,13 @@
 
 ### Phase 3: Full CRUD UI for Agents
 - [ ] Build `/agents` as full management page (not just drawer):
-- [ ] Agent list, search, sort, active toggle.
+- [x] Agent list, search, sort, active toggle.
 - [ ] Create form with advanced sections:
 - [ ] Core identity: name, description, tone.
 - [ ] Prompting: system prompt, focus areas, reference notes.
 - [ ] Output contract: required format, bullet count, mandatory quote/citation options.
 - [ ] Display settings: color theme, icon/label.
-- [ ] Edit + duplicate + delete actions.
+- [x] Edit + duplicate + delete actions.
 - [ ] Guardrails for system default agents (lock/delete behavior, reset option).
 
 ### Phase 4: Defaults + Persistence Behavior

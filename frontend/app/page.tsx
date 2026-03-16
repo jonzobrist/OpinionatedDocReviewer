@@ -34,6 +34,11 @@ import {
   saveAgentThemes
 } from '../src/lib/agentThemes';
 import {
+  AgentListSort,
+  createDuplicateAgentName,
+  listVisibleAgents
+} from '../src/lib/agentList';
+import {
   AdminOverview,
   AdminUserRead,
   DocumentPermissionRead,
@@ -219,6 +224,8 @@ function HomePageContent() {
   const [agentDraft, setAgentDraft] = useState<AgentDraft>(() => createEmptyAgentDraft());
   const [isAgentSaving, setIsAgentSaving] = useState(false);
   const [agentBusyId, setAgentBusyId] = useState<number | null>(null);
+  const [agentSearch, setAgentSearch] = useState('');
+  const [agentSortBy, setAgentSortBy] = useState<AgentListSort>('order');
   const [agentImportConflictPolicy, setAgentImportConflictPolicy] = useState<
     'skip' | 'overwrite' | 'rename'
   >('rename');
@@ -323,6 +330,10 @@ function HomePageContent() {
   const editingPersona = useMemo(
     () => personas.find((persona) => persona.id === editingPersonaId) ?? null,
     [personas, editingPersonaId]
+  );
+  const visibleAgents = useMemo(
+    () => listVisibleAgents(personas, agentSearch, agentSortBy),
+    [personas, agentSearch, agentSortBy]
   );
 
   useEffect(() => {
@@ -1604,6 +1615,19 @@ function HomePageContent() {
     setAgentDraft(createEmptyAgentDraft());
   }
 
+  function handleDuplicateAgent(persona: PersonaRead) {
+    const duplicateName = createDuplicateAgentName(personas, persona.name);
+    const draft = createDraftFromPersona(persona);
+    setIsCreatingAgent(true);
+    setEditingPersonaId(null);
+    setAgentDraft({
+      ...draft,
+      name: duplicateName,
+      sort_order: persona.sort_order + 1
+    });
+    setStatusMessage(`Duplicating "${persona.name}". Save to create a new agent.`);
+  }
+
   async function handleSaveAgent() {
     setErrorMessage(null);
     if (!agentDraft.name.trim()) {
@@ -1728,6 +1752,33 @@ function HomePageContent() {
         updateAgentTheme(reverted.id, reverted.color_theme, reverted.name);
       }
       setStatusMessage(`Reverted "${reverted.name}" to default.`);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setAgentBusyId(null);
+    }
+  }
+
+  async function handleQuickToggleAgent(persona: PersonaRead) {
+    setErrorMessage(null);
+    setAgentBusyId(persona.id);
+    try {
+      const updated = await apiFetch<PersonaRead>(`/personas/${persona.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          is_active: !persona.is_active
+        })
+      });
+      setPersonas((prev) =>
+        prev
+          .map((item) => (item.id === updated.id ? updated : item))
+          .slice()
+          .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+      );
+      if (editingPersonaId === updated.id) {
+        setAgentDraft(createDraftFromPersona(updated));
+      }
+      setStatusMessage(updated.is_active ? `Enabled "${updated.name}".` : `Disabled "${updated.name}".`);
     } catch (error) {
       setErrorMessage(normalizeError(error));
     } finally {
@@ -4179,18 +4230,39 @@ function HomePageContent() {
 
             <div className="agents-workspace">
               <aside className="agents-list">
+                <div className="agents-list-toolbar">
+                  <input
+                    className="input compact"
+                    placeholder="Search agents"
+                    value={agentSearch}
+                    onChange={(event) => setAgentSearch(event.target.value)}
+                  />
+                  <select
+                    className="input compact"
+                    aria-label="Sort agents"
+                    value={agentSortBy}
+                    onChange={(event) => setAgentSortBy(event.target.value as AgentListSort)}
+                  >
+                    <option value="order">sort: order</option>
+                    <option value="name">sort: name</option>
+                    <option value="status">sort: status</option>
+                  </select>
+                </div>
                 {personas.length === 0 && <div className="subtle">No agents configured.</div>}
-                {personas
-                  .slice()
-                  .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
-                  .map((persona) => {
-                    const color = getThemeForPersona(agentThemes, persona.id, colorForPersona(persona.id));
-                    const selected = persona.id === editingPersonaId;
-                    return (
+                {personas.length > 0 && visibleAgents.length === 0 && (
+                  <div className="subtle">No agents match your search.</div>
+                )}
+                {visibleAgents.map((persona) => {
+                  const color = getThemeForPersona(agentThemes, persona.id, colorForPersona(persona.id));
+                  const selected = persona.id === editingPersonaId;
+                  return (
+                    <div
+                      key={persona.id}
+                      className={`agents-list-item ${selected ? 'active' : ''}`}
+                    >
                       <button
-                        key={persona.id}
                         type="button"
-                        className={`agents-list-item ${selected ? 'active' : ''}`}
+                        className="agents-list-select"
                         onClick={() => {
                           setPersonaForEditing(persona);
                         }}
@@ -4208,8 +4280,30 @@ function HomePageContent() {
                           <span className="meta-pill">Order {persona.sort_order}</span>
                         </div>
                       </button>
-                    );
-                  })}
+                      <div className="agents-inline-actions">
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          disabled={agentBusyId === persona.id}
+                          onClick={() => void handleQuickToggleAgent(persona)}
+                        >
+                          {agentBusyId === persona.id
+                            ? 'Saving...'
+                            : persona.is_active
+                              ? 'Disable'
+                              : 'Enable'}
+                        </button>
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          onClick={() => handleDuplicateAgent(persona)}
+                        >
+                          Duplicate
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </aside>
 
               <section className="agents-editor">

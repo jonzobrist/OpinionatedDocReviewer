@@ -412,7 +412,9 @@ describe('page controls', () => {
           201
         );
       }
-      if (url.endsWith('/personas') && (!init || init.method === 'GET')) return json(personasPayload);
+      if (url.endsWith('/personas') && (!init?.method || init.method === 'GET')) {
+        return json(personasPayload);
+      }
       if (url.endsWith('/personas') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body || '{}'));
         return json({
@@ -1059,6 +1061,48 @@ describe('page controls', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Save Agent' })).toBeTruthy();
     });
+  });
+
+  it('duplicates an existing agent into a create draft', async () => {
+    mockPathname = '/agents';
+    render(<HomePage />);
+
+    await screen.findByText('Clarity Editor');
+    fireEvent.click(await screen.findByRole('button', { name: 'Duplicate' }));
+
+    expect(await screen.findByDisplayValue('Clarity Editor Copy')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Create Agent' })).toBeTruthy();
+  });
+
+  it('quick toggles active status from the agent list', async () => {
+    mockPathname = '/agents';
+    render(<HomePage />);
+
+    await screen.findByText('Clarity Editor');
+    fireEvent.click(await screen.findByRole('button', { name: 'Disable' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Enable' })).toBeTruthy();
+    });
+    const patchCall = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.find(
+      (args) =>
+        String(args[0]).includes('/personas/1') &&
+        args[1]?.method === 'PATCH' &&
+        String(args[1]?.body ?? '').includes('"is_active":false')
+    );
+    expect(patchCall).toBeTruthy();
+  });
+
+  it('filters agent list by search', async () => {
+    mockPathname = '/agents';
+    render(<HomePage />);
+
+    await screen.findByText('Clarity Editor');
+    fireEvent.change(await screen.findByPlaceholderText('Search agents'), {
+      target: { value: 'not-a-match' }
+    });
+
+    expect(await screen.findByText('No agents match your search.')).toBeTruthy();
   });
 
   it('opens admin overlay from route', async () => {
