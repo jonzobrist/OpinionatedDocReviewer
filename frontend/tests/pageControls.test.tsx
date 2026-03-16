@@ -825,7 +825,7 @@ describe('page controls', () => {
       await screen.findByText('Anchored reviewer comments for this document version.')
     ).toBeTruthy();
     expect(
-      await screen.findByText('No meta directives found for this run yet. Showing individual reviewer comments.')
+      await screen.findByText('No meta directives available for this run yet. Recompute to synthesize now.')
     ).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Meta' }));
@@ -850,7 +850,7 @@ describe('page controls', () => {
       await screen.findByText('Anchored reviewer comments for this document version.')
     ).toBeTruthy();
     expect(
-      await screen.findByText('No meta directives found for this run yet. Showing individual reviewer comments.')
+      await screen.findByText('No meta directives available for this run yet. Recompute to synthesize now.')
     ).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Meta' }));
