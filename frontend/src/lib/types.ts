@@ -251,6 +251,23 @@ export type MetaCommentRead = {
   sources: MetaCommentSourceRead[];
 };
 
+export type MetaAttentionPointRead = {
+  meta_comment_id: number;
+  location: string;
+  reason: string;
+  priority: 'critical' | 'high' | 'medium' | 'low' | string;
+  start_offset: number;
+  end_offset: number;
+  source_comment_ids: number[];
+};
+
+export type MetaReviewSummaryRead = {
+  verdict: 'clean' | 'review_needed' | 'problems';
+  attention_points: MetaAttentionPointRead[];
+  clean_sections: string[];
+  clean_statement: string;
+};
+
 export type MetaReviewRunRead = {
   id: number;
   tenant_id: string;
@@ -264,6 +281,7 @@ export type MetaReviewRunRead = {
   error_message: string | null;
   created_at: string;
   comments: MetaCommentRead[];
+  summary: MetaReviewSummaryRead | null;
 };
 
 export type WorkerSnapshotRead = {

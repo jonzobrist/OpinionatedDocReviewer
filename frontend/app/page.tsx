@@ -1897,6 +1897,7 @@ function HomePageContent() {
         return a.order_index - b.order_index;
       });
   }, [metaReviewRun, metaCategoryFilter]);
+  const metaSummary = metaReviewRun?.summary ?? null;
 
   const activeCommentId = focusedCommentId ?? hoveredCommentId;
   const activeMetaCommentId = commentViewMode === 'meta' ? focusedMetaCommentId ?? hoveredMetaCommentId : null;
@@ -2706,6 +2707,22 @@ function HomePageContent() {
             model: runForBundle.model,
             error_message: runForBundle.error_message,
             created_at: runForBundle.created_at,
+            summary: runForBundle.summary
+              ? {
+                  verdict: runForBundle.summary.verdict,
+                  attention_points: runForBundle.summary.attention_points.map((point) => ({
+                    meta_comment_id: point.meta_comment_id,
+                    location: point.location,
+                    reason: point.reason,
+                    priority: point.priority,
+                    start_offset: point.start_offset,
+                    end_offset: point.end_offset,
+                    source_comment_ids: point.source_comment_ids
+                  })),
+                  clean_sections: runForBundle.summary.clean_sections,
+                  clean_statement: runForBundle.summary.clean_statement
+                }
+              : null,
             comments: runForBundle.comments.map((metaComment) => ({
               content: metaComment.content,
               category: metaComment.category,
@@ -3224,7 +3241,7 @@ function HomePageContent() {
                 <div className="feed-title">Comments</div>
                 <div className="feed-sub">
                   {commentViewMode === 'meta'
-                    ? 'Meta-synthesized directives with source attribution.'
+                    ? 'Verdict, top attention points, and clean sections.'
                     : 'Anchored reviewer comments for this document version.'}
                 </div>
               </div>
@@ -3318,6 +3335,78 @@ function HomePageContent() {
                 )}
               </div>
             </div>
+            {commentViewMode === 'meta' &&
+              !isMetaLoading &&
+              metaViewState === 'ready' &&
+              metaSummary && (
+                <div className="meta-summary-panel">
+                  <div className={`meta-verdict meta-verdict-${metaSummary.verdict}`}>
+                    <div className="meta-verdict-icon">
+                      {metaSummary.verdict === 'clean'
+                        ? '✓'
+                        : metaSummary.verdict === 'problems'
+                          ? '!'
+                          : '•'}
+                    </div>
+                    <div>
+                      <div className="meta-verdict-label">
+                        {metaSummary.verdict === 'clean'
+                          ? 'Clean'
+                          : metaSummary.verdict === 'problems'
+                            ? 'Problems'
+                            : 'Review needed'}
+                      </div>
+                      <div className="meta-verdict-copy">
+                        {metaSummary.verdict === 'clean'
+                          ? 'No significant issues found.'
+                          : metaSummary.verdict === 'problems'
+                            ? 'Do not approve, send, or ship without fixing these.'
+                            : 'A few things are worth your attention.'}
+                      </div>
+                    </div>
+                  </div>
+                  {metaSummary.attention_points.length > 0 && (
+                    <div className="meta-summary-block">
+                      <div className="meta-summary-title">Top attention points</div>
+                      <div className="meta-attention-list">
+                        {metaSummary.attention_points.map((point) => (
+                          <button
+                            key={`meta-summary-${point.meta_comment_id}`}
+                            type="button"
+                            className="meta-attention-item"
+                            onClick={() => {
+                              setFocusedMetaCommentId(point.meta_comment_id);
+                              const target = metaReviewRun?.comments.find(
+                                (comment) => comment.id === point.meta_comment_id
+                              );
+                              const sourceId = target?.sources[0]?.comment_id ?? null;
+                              if (sourceId) {
+                                focusComment(sourceId);
+                              }
+                            }}
+                          >
+                            <span className={`priority-pill ${point.priority}`}>{point.priority}</span>
+                            <strong>{point.location}</strong>: {point.reason}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="meta-summary-block">
+                    <div className="meta-summary-title">What is fine</div>
+                    <div className="meta-clean-copy">{metaSummary.clean_statement}</div>
+                    {metaSummary.clean_sections.length > 0 && (
+                      <div className="meta-clean-sections">
+                        {metaSummary.clean_sections.map((section) => (
+                          <span key={section} className="meta-clean-pill">
+                            {section}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             <div
               className="feed-list"
               ref={feedListRef}
@@ -3439,7 +3528,11 @@ function HomePageContent() {
                 !isMetaLoading &&
                 metaViewState === 'ready' &&
                 filteredMetaComments.length === 0 && (
-                  <div className="empty-feed">No significant issues found.</div>
+                  <div className="empty-feed">
+                    {(metaReviewRun?.comments.length ?? 0) > 0
+                      ? 'No attention points match this category filter.'
+                      : 'No attention points were raised.'}
+                  </div>
                 )}
               {commentViewMode === 'meta' &&
                 !isMetaLoading &&
@@ -3498,36 +3591,18 @@ function HomePageContent() {
                           <span className="agent-dot" style={{ backgroundColor: pseudoColor }} />
                           Meta Reviewer
                         </div>
-                        <span className={`priority-pill ${metaComment.priority}`}>
-                          {metaComment.priority}
-                        </span>
+                        <span className={`priority-pill ${metaComment.priority}`}>{metaComment.priority}</span>
                       </div>
                       <div className="meta-tags">
+                        <span className="meta-pill">
+                          {metaSummary?.attention_points.find(
+                            (point) => point.meta_comment_id === metaComment.id
+                          )?.location ?? `${metaComment.start_offset}-${metaComment.end_offset}`}
+                        </span>
                         <span className="meta-pill">{metaComment.category}</span>
-                        <span className="meta-pill">impact {metaComment.impact}</span>
-                        <span className="meta-pill">effort {metaComment.effort}</span>
-                        <span className="meta-pill">
-                          conf {(metaComment.confidence * 100).toFixed(0)}%
-                        </span>
-                        <span className="meta-pill">score {metaComment.rank_score.toFixed(2)}</span>
-                        <span className="meta-pill">status {metaComment.status}</span>
-                        <span className="meta-pill">
-                          {metaComment.start_offset}-{metaComment.end_offset}
-                        </span>
                         {!metaReviewRun?.is_synthesized && <span className="meta-pill">fallback</span>}
                       </div>
                       <div className="comment-text">{metaComment.content}</div>
-                      {(metaComment.why_now || metaComment.recommended_change || metaComment.verification_step) && (
-                        <div className="comment-source-preview">
-                          {metaComment.why_now && <div><strong>Why now:</strong> {metaComment.why_now}</div>}
-                          {metaComment.recommended_change && (
-                            <div><strong>Change:</strong> {metaComment.recommended_change}</div>
-                          )}
-                          {metaComment.verification_step && (
-                            <div><strong>Verify:</strong> {metaComment.verification_step}</div>
-                          )}
-                        </div>
-                      )}
                       <details className="comment-source">
                         <summary>Show sources ({metaComment.sources.length})</summary>
                         <div className="meta-sources">

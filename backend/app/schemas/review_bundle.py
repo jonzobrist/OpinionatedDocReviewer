@@ -79,6 +79,23 @@ class BundleMetaComment(BaseModel):
     sources: list[BundleMetaCommentSource] = Field(default_factory=list)
 
 
+class BundleMetaAttentionPoint(BaseModel):
+    meta_comment_id: int
+    location: str
+    reason: str
+    priority: str
+    start_offset: int
+    end_offset: int
+    source_comment_ids: list[int] = Field(default_factory=list)
+
+
+class BundleMetaSummary(BaseModel):
+    verdict: str
+    attention_points: list[BundleMetaAttentionPoint] = Field(default_factory=list)
+    clean_sections: list[str] = Field(default_factory=list)
+    clean_statement: str
+
+
 class BundleMetaReviewRun(BaseModel):
     status: str = "completed"
     queued_at: datetime | None = None
@@ -91,6 +108,7 @@ class BundleMetaReviewRun(BaseModel):
     error_code: str | None = None
     error_message: str | None = None
     created_at: datetime | None = None
+    summary: BundleMetaSummary | None = None
     comments: list[BundleMetaComment] = Field(default_factory=list)
 
 

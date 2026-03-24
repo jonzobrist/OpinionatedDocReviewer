@@ -26,7 +26,7 @@ The work follows three interconnected tracks:
 
 **Track 1: Review engine depth.** The persona schema is richer than what the prompt builder currently uses. Phase 2 of the agent roadmap — making the prompt builder honor output_requirements, reference_notes, and examples consistently — is the highest-leverage work. A well-constrained persona with enforced output contracts produces dramatically better reviews than a loosely prompted one. This is where review quality lives.
 
-**Track 2: Meta-critic intelligence.** The initial meta-critic exists but needs to become the primary user-facing synthesis layer. The UX should lead with the meta-critic's grouped findings, with per-reviewer detail as drill-down. This inverts the current flow (reviewer comments first, meta-summary second) and makes the tool scale to more personas without overwhelming the user.
+**Track 2: Meta-critic intelligence.** The initial meta-critic exists but needs to become the primary user-facing synthesis layer. The UX should lead with a clear verdict, 3-5 location-specific attention points, and explicit clean sections, with per-reviewer detail as drill-down. This inverts the current flow (reviewer comments first, meta-summary second) and makes the tool scale to more personas without overwhelming the user.
 
 **Track 3: Platform hardening.** Multi-tenant isolation, OIDC auth, the storage layer beneath documents and reviews — these enable the tool to serve teams and groups, not just individuals. The split between API and frontend is already clean; the remaining work is making the backend robust enough that multiple frontends (web, CLI, mobile) can trust it as a reliable service.
 

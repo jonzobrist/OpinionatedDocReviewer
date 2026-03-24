@@ -158,6 +158,10 @@ def test_meta_review_create_and_cache(client, monkeypatch) -> None:
     assert body["error_message"] is None
     assert body["error_details"] is None
     assert len(body["comments"]) == 1
+    assert body["summary"]["verdict"] == "problems"
+    assert body["summary"]["attention_points"][0]["meta_comment_id"] == body["comments"][0]["id"]
+    assert body["summary"]["attention_points"][0]["reason"] == body["comments"][0]["content"]
+    assert body["summary"]["clean_statement"] == "No section is clean enough to skip yet."
     assert body["comments"][0]["priority"] == "high"
     assert body["comments"][0]["impact"] == "high"
     assert body["comments"][0]["effort"] == "medium"
@@ -237,6 +241,7 @@ def test_latest_meta_review_supports_lightweight_mode_without_comments(client, m
     assert lightweight["completed_at"] == full_latest["completed_at"]
     assert lightweight["failed_at"] == full_latest["failed_at"]
     assert lightweight["comments"] == []
+    assert lightweight["summary"] is None
 
 
 def test_latest_meta_review_prefers_newest_review_context_over_stale_created_later(
