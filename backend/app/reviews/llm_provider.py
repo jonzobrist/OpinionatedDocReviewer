@@ -20,6 +20,8 @@ def get_model_label() -> str:
     provider = get_provider_name()
     if provider == "bedrock":
         return settings.BEDROCK_MODEL_ID
+    if provider == "llamacpp":
+        return settings.LLAMACPP_MODEL
     return settings.OPENAI_MODEL
 
 
@@ -29,11 +31,21 @@ def generate_completion(prompt: str) -> str:
         return _generate_with_openai(prompt)
     if provider == "bedrock":
         return _generate_with_bedrock(prompt)
+    if provider == "llamacpp":
+        return _generate_with_llamacpp(prompt)
     raise LLMProviderError(f"Unsupported LLM provider: {settings.LLM_PROVIDER}")
 
 
 def provider_health() -> dict[str, Any]:
     provider = get_provider_name()
+    if provider == "llamacpp":
+        try:
+            import httpx
+            resp = httpx.get(f"{settings.LLAMACPP_BASE_URL}/models", timeout=5)
+            ok = resp.status_code == 200
+            return {"provider": "llamacpp", "ok": ok, "error": None if ok else f"HTTP {resp.status_code}", "model": settings.LLAMACPP_MODEL}
+        except Exception as exc:
+            return {"provider": "llamacpp", "ok": False, "error": str(exc), "model": settings.LLAMACPP_MODEL}
     if provider == "openai":
         return {
             "provider": "openai",
@@ -80,6 +92,28 @@ def provider_health() -> dict[str, Any]:
         "error": f"Unsupported LLM provider: {settings.LLM_PROVIDER}",
         "model": None,
     }
+
+
+def _generate_with_llamacpp(prompt: str) -> str:
+    from openai import OpenAI as _OpenAI, OpenAIError
+    client = _OpenAI(
+        base_url=settings.LLAMACPP_BASE_URL,
+        api_key=settings.LLAMACPP_API_KEY,
+        timeout=settings.OPENAI_TIMEOUT_SECONDS,
+    )
+    try:
+        response = client.chat.completions.create(
+            model=settings.LLAMACPP_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=settings.LLAMACPP_MAX_TOKENS,
+            temperature=settings.OPENAI_TEMPERATURE,
+        )
+        text = (response.choices[0].message.content or "").strip()
+        if not text:
+            raise LLMProviderError("llamacpp returned no text output")
+        return text
+    except OpenAIError as exc:
+        raise LLMProviderError(str(exc)) from exc
 
 
 def _generate_with_openai(prompt: str) -> str:

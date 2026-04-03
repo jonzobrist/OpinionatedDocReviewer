@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     COMMENT_MAX_CHARS: int = 4000
     OPENAI_TEMPERATURE: float = 0.2
     OPENAI_TIMEOUT_SECONDS: int = 30
+    LLAMACPP_BASE_URL: str = "http://100.89.116.109:8080/v1"
+    LLAMACPP_MODEL: str = "ggml-org/gemma-4-26B-A4B-it-GGUF:Q4_K_M"
+    LLAMACPP_API_KEY: str = "no-key"
+    LLAMACPP_MAX_TOKENS: int = 2048  # thinking models need headroom for reasoning trace
     BEDROCK_MODEL_ID: str = "anthropic.claude-3-5-haiku-20241022-v1:0"
     BEDROCK_REGION: str = "us-east-1"
     BEDROCK_AWS_ACCESS_KEY_ID: str | None = None
