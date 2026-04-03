@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     COMMENT_MAX_CHARS: int = 4000
     OPENAI_TEMPERATURE: float = 0.2
     OPENAI_TIMEOUT_SECONDS: int = 30
+    REVIEW_JOB_TIMEOUT_SECONDS: int = 1800  # wall-clock RQ job timeout (default 30min for slow local LLMs)
     LLAMACPP_BASE_URL: str = "http://100.89.116.109:8080/v1"
     LLAMACPP_MODEL: str = "ggml-org/gemma-4-26B-A4B-it-GGUF:Q4_K_M"
     LLAMACPP_API_KEY: str = "no-key"
