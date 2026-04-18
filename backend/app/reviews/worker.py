@@ -153,6 +153,29 @@ def run_review_job(review_job_id: int, tenant_id: str) -> None:
             db.commit()
             return
 
+        # Defense against doc-id reuse: if the parent document has been
+        # deleted between enqueue and dequeue, abort rather than writing
+        # comments that could attach to a new document with a reused id.
+        parent_document = (
+            db.query(models.Document)
+            .filter(
+                models.Document.id == version.document_id,
+                models.Document.tenant_id == tenant_id,
+            )
+            .first()
+        )
+        if not parent_document:
+            logger.warning(
+                "review_job_aborted_parent_missing tenant_id=%s review_job_id=%s version_id=%s document_id=%s",
+                tenant_id,
+                review_job_id,
+                version.id,
+                version.document_id,
+            )
+            job.status = "failed"
+            db.commit()
+            return
+
         personas = _list_active_personas_for_execution(db, tenant_id)
         if not personas:
             seed_default_personas(tenant_id=tenant_id, db=db)
