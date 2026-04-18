@@ -118,7 +118,8 @@ class Settings(BaseSettings):
     OIDC_NAME_CLAIM: str = "name"
     OIDC_ROLES_CLAIM: str = "roles"
     OIDC_ADMIN_ROLE: str = "admin"
-    OIDC_ALLOW_LOCAL_HEADER_FALLBACK: bool = True
+    OIDC_ALLOW_LOCAL_HEADER_FALLBACK: bool = False
+    MAX_REQUEST_BODY_BYTES: int = 5 * 1024 * 1024
     LOCAL_AUTH_JWT_SECRET: str = "change-me-local-auth-secret"
     LOCAL_AUTH_JWT_ALGORITHM: str = "HS256"
     LOCAL_AUTH_ACCESS_TOKEN_TTL_MINUTES: int = 720

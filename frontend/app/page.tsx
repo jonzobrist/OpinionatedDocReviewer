@@ -246,6 +246,17 @@ function HomePageContent() {
   const hoveredMetaCommentIdRef = useRef<number | null>(null);
   const hoverAlignFrameRef = useRef<number | null>(null);
   const handledRouteIntentRef = useRef<string | null>(null);
+  // Selection-generation: bumped on every document switch. Async fetches
+  // capture the value at call time and drop their response if the user
+  // has switched to a different document before the response returns.
+  // This prevents stale polling/refresh responses from overwriting fresh
+  // state when the user rapidly switches between documents.
+  const selectedVersionIdRef = useRef<number | null>(null);
+  const selectedReviewJobIdRef = useRef<number | null>(null);
+  const selectionGenerationRef = useRef(0);
+  // Dedupe key for in-flight meta auto-loads so polling-driven status
+  // changes do not fire concurrent duplicate requests.
+  const metaLoadInFlightRef = useRef<string | null>(null);
   const isApplyingRouteQueryStateRef = useRef(false);
   const importAgentsInputRef = useRef<HTMLInputElement | null>(null);
   const importReviewBundleInputRef = useRef<HTMLInputElement | null>(null);
@@ -386,20 +397,26 @@ function HomePageContent() {
   }, [agentImportConflictPolicy]);
 
   useEffect(() => {
-    if (!selectedVersionId) return;
-    const interval = setInterval(() => {
-      void loadComments(selectedVersionId, true, selectedReviewJobId);
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [selectedVersionId, selectedReviewJobId]);
+    selectedVersionIdRef.current = selectedVersionId;
+    selectionGenerationRef.current += 1;
+  }, [selectedVersionId]);
 
   useEffect(() => {
-    if (!selectedVersionId) return;
+    selectedReviewJobIdRef.current = selectedReviewJobId;
+  }, [selectedReviewJobId]);
+
+  useEffect(() => {
+    // Single run-once poller reads from refs so fast doc-switches do not
+    // leave ghost intervals bound to stale (versionId, reviewJobId) values.
     const interval = setInterval(() => {
-      void loadReviewJobsSnapshot(selectedVersionId);
+      const vid = selectedVersionIdRef.current;
+      if (!vid) return;
+      const jid = selectedReviewJobIdRef.current;
+      void loadComments(vid, true, jid);
+      void loadReviewJobsSnapshot(vid);
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [selectedVersionId, selectedReviewJobId]);
+  }, []);
 
   useEffect(() => {
     setMetaReviewRun(null);
@@ -419,9 +436,19 @@ function HomePageContent() {
   useEffect(() => {
     if (commentViewMode !== 'meta') return;
     if (!selectedVersionId) return;
+    // Key includes everything that meaningfully changes a meta-load outcome.
+    // Polling can rebuild reviewJobs on every tick, but if (version, job,
+    // status) is unchanged we must not fire a duplicate request in flight.
+    const key = `${selectedVersionId}:${selectedReviewJobId ?? 'none'}:${selectedReviewJob?.status ?? 'na'}:${commentModeSelectionSource}`;
+    if (metaLoadInFlightRef.current === key) return;
+    metaLoadInFlightRef.current = key;
     void loadOrCreateMetaReview(selectedVersionId, selectedReviewJobId, false, {
       fallbackToIndividualOnMissing: commentModeSelectionSource === 'auto',
       reviewJobStatus: selectedReviewJob?.status ?? null
+    }).finally(() => {
+      if (metaLoadInFlightRef.current === key) {
+        metaLoadInFlightRef.current = null;
+      }
     });
   }, [
     commentViewMode,
@@ -826,9 +853,14 @@ function HomePageContent() {
     jobs: ReviewJobRead[];
     selectedId: number | null;
   }> {
-    const currentSelected = selectedReviewJobId;
+    const generationAtCall = selectionGenerationRef.current;
+    const currentSelected = selectedReviewJobIdRef.current;
     try {
       const jobs = await apiFetch<ReviewJobRead[]>(`/review-jobs?document_version_id=${versionId}`);
+      // Drop the response if the user has switched documents in the meantime.
+      if (selectionGenerationRef.current !== generationAtCall) {
+        return { jobs: [], selectedId: currentSelected };
+      }
       setReviewJobs(jobs);
       if (jobs.length === 0) {
         setSelectedReviewJobId(null);
@@ -901,9 +933,14 @@ function HomePageContent() {
     markRecent: boolean,
     reviewJobId?: number | null
   ): Promise<CommentRead[]> {
+    const generationAtCall = selectionGenerationRef.current;
     try {
       const query = reviewJobId ? `&review_job_id=${reviewJobId}` : '';
       const data = await apiFetch<CommentRead[]>(`/comments?document_version_id=${versionId}${query}`);
+      // Drop stale response if the user has switched documents.
+      if (selectionGenerationRef.current !== generationAtCall) {
+        return commentsRef.current;
+      }
       const signature = buildCommentSignature(data);
       if (markRecent) {
         const now = Date.now();

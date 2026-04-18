@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from app.core.config import settings
 
 
@@ -77,6 +79,54 @@ def test_document_and_versions_crud(client) -> None:
 
     get_missing = client.get(f"/api/documents/{doc_id}", headers=headers)
     assert get_missing.status_code == 404
+
+
+def test_delete_document_removes_git_repo_and_prevents_id_reuse(
+    client, tmp_path, monkeypatch
+) -> None:
+    """Regression: deleting a document must (a) clean the git-backed
+    history directory and (b) not leak that history to a subsequently
+    created document. Previously the doc-repos/<tenant>/doc-<id>
+    directory persisted after delete, and SQLite rowid reuse could give
+    a new document the same id, inheriting the old history plus any
+    in-flight comments.
+    """
+    monkeypatch.setattr(settings, "DOC_REPO_ROOT", str(tmp_path / "doc-repos"))
+    monkeypatch.setattr(settings, "DOC_REPO_ENABLED", True)
+
+    headers = {"X-Tenant-Id": "tenant-reuse"}
+
+    doc_a = client.post("/api/documents", json={"title": "Doc A"}, headers=headers).json()
+    version_a = client.post(
+        f"/api/documents/{doc_a['id']}/versions",
+        json={"version_label": "v1", "content": "Alpha content"},
+        headers=headers,
+    )
+    assert version_a.status_code == 201
+
+    repo_a_path = Path(settings.DOC_REPO_ROOT) / "tenant-reuse" / f"doc-{doc_a['id']}"
+    assert repo_a_path.exists(), "repo should be created for doc A"
+    assert (repo_a_path / ".git").exists()
+
+    delete_resp = client.delete(f"/api/documents/{doc_a['id']}", headers=headers)
+    assert delete_resp.status_code == 204
+    assert not repo_a_path.exists(), "git repo must be removed on delete"
+
+    doc_b = client.post("/api/documents", json={"title": "Doc B"}, headers=headers).json()
+    assert doc_b["id"] != doc_a["id"], (
+        "SQLite AUTOINCREMENT must prevent id reuse across deletes"
+    )
+
+    version_b = client.post(
+        f"/api/documents/{doc_b['id']}/versions",
+        json={"version_label": "v1", "content": "Beta content"},
+        headers=headers,
+    )
+    assert version_b.status_code == 201
+
+    repo_b_path = Path(settings.DOC_REPO_ROOT) / "tenant-reuse" / f"doc-{doc_b['id']}"
+    commits = [p for p in repo_b_path.glob(".git/refs/heads/*") if p.is_file()]
+    assert commits, "doc B must have its own fresh git history"
 
 
 def test_document_version_content_size_limit(client) -> None:

@@ -21,6 +21,20 @@ def test_git_repo_rejects_path_traversal_tenant() -> None:
         assert exc.status_code == 400
 
 
+def test_body_size_limit_rejects_oversized_content_length(client, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "MAX_REQUEST_BODY_BYTES", 1024)
+    response = client.post(
+        "/api/documents",
+        content=b"{}",
+        headers={
+            "X-Tenant-Id": "tenant-size",
+            "Content-Type": "application/json",
+            "Content-Length": str(10 * 1024),
+        },
+    )
+    assert response.status_code == 413
+
+
 def test_rate_limit_blocks_excess_requests(client, monkeypatch) -> None:
     monkeypatch.setattr(settings, "RATE_LIMIT_ENABLED", True)
     monkeypatch.setattr(settings, "RATE_LIMIT_WINDOW_SECONDS", 60)

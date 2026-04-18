@@ -12,9 +12,6 @@ def create_version(
     document_id: int,
     data: DocumentVersionCreate,
 ) -> models.DocumentVersion:
-    if settings.DOC_REPO_ENABLED:
-        repo = ensure_repo(tenant_id, document_id)
-        write_and_commit(repo, data.content, f"{data.version_label}")
     version = models.DocumentVersion(
         tenant_id=tenant_id,
         document_id=document_id,
@@ -24,6 +21,9 @@ def create_version(
     db.add(version)
     db.commit()
     db.refresh(version)
+    if settings.DOC_REPO_ENABLED:
+        repo = ensure_repo(tenant_id, document_id)
+        write_and_commit(repo, data.content, f"{data.version_label}")
     return version
 
 
