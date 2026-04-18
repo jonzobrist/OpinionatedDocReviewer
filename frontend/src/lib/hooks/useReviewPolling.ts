@@ -18,6 +18,12 @@ export type PollCallback = (
  *   Callers that issue async fetches can capture the value at call-site
  *   and drop state-writes whose generation no longer matches the current
  *   one — preventing out-of-order responses from overwriting fresh state.
+ *
+ * All ref-syncing lives in a single effect to avoid adding extra render
+ * cycles beyond what the inline pattern required. Each additional effect
+ * adds a commit-phase tick and an extra microtask flush under Testing
+ * Library, which surfaces as findByText timeouts in CI where the default
+ * 1000ms window is tight.
  */
 export function useReviewPolling(opts: {
   versionId: number | null;
@@ -29,20 +35,18 @@ export function useReviewPolling(opts: {
   const reviewJobIdRef = useRef(opts.reviewJobId);
   const onPollRef = useRef(opts.onPoll);
   const generationRef = useRef(0);
+  const lastVersionIdRef = useRef(opts.versionId);
   const intervalMs = opts.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 
   useEffect(() => {
     versionIdRef.current = opts.versionId;
-    generationRef.current += 1;
-  }, [opts.versionId]);
-
-  useEffect(() => {
     reviewJobIdRef.current = opts.reviewJobId;
-  }, [opts.reviewJobId]);
-
-  useEffect(() => {
     onPollRef.current = opts.onPoll;
-  }, [opts.onPoll]);
+    if (lastVersionIdRef.current !== opts.versionId) {
+      generationRef.current += 1;
+      lastVersionIdRef.current = opts.versionId;
+    }
+  });
 
   useEffect(() => {
     const interval = setInterval(() => {
