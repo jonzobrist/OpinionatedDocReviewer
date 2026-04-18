@@ -23,6 +23,7 @@ logs/
 frontend/.next/
 frontend/node_modules/
 backend/.venv/
+node_modules/
 
 # macOS
 .DS_Store
@@ -34,3 +35,6 @@ frontend/.env.development.local
 frontend/.env.test.local
 frontend/.env.production.local
 agents_local/
+
+# Codex
+car
