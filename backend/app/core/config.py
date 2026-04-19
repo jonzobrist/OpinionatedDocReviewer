@@ -138,6 +138,14 @@ class Settings(BaseSettings):
     # still renders using the deterministic rule-based verdict so the UI
     # stays usable in air-gapped / degraded scenarios.
     META_VERDICT_USE_LLM: bool = True
+    # When True, meta-directive dedupe uses cosine similarity on
+    # embeddings of the directive content (plus the existing location /
+    # category boosts) instead of token-Jaccard. Catches semantic
+    # duplicates that share meaning but not words. Falls back to the
+    # Jaccard path on embedding-provider failure so dedupe always runs.
+    META_DEDUPE_USE_EMBEDDINGS: bool = True
+    META_DEDUPE_EMBEDDING_THRESHOLD: float = 0.85
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     META_AGENT_NAME: str = "Meta Reviewer"
     META_AGENT_DESCRIPTION: str = "Synthesizes reviewer comments into ranked directives."
     META_AGENT_SYSTEM_PROMPT: str = (

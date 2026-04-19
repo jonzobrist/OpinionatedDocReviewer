@@ -27,6 +27,10 @@ def client(monkeypatch):
     # that exercise the LLM verdict explicitly opt in and patch
     # generate_completion themselves.
     monkeypatch.setattr(settings, "META_VERDICT_USE_LLM", False)
+    # Also keep the embedding-driven dedupe off so existing tests do not
+    # hit the embedding provider. Tests exercising the embedding path
+    # opt in and patch generate_embeddings themselves.
+    monkeypatch.setattr(settings, "META_DEDUPE_USE_EMBEDDINGS", False)
     monkeypatch.setattr(
         "app.api.review_jobs.enqueue_review_job",
         lambda job_id, tenant_id: None,
