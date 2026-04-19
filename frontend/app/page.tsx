@@ -45,6 +45,7 @@ import { MermaidDiagram } from './components/MermaidDiagram';
 import { AdminPanel } from './components/AdminPanel';
 import { SystemPanel } from './components/SystemPanel';
 import { HistoryPanel } from './components/HistoryPanel';
+import { LibraryPanel } from './components/LibraryPanel';
 
 const POLL_INTERVAL_MS = 1200;
 const META_STATUS_POLL_MAX_ATTEMPTS = 8;
@@ -120,12 +121,6 @@ function HomePageContent() {
   const [metaCategoryFilter, setMetaCategoryFilter] = useState<
     'all' | 'structure' | 'clarity' | 'technical' | 'security' | 'accessibility' | 'style'
   >('all');
-  const [libraryFilter, setLibraryFilter] = useState<
-    'all' | 'needs' | 'reviewed' | 'archived'
-  >('all');
-  const [librarySearch, setLibrarySearch] = useState('');
-  const [selectedLibraryIds, setSelectedLibraryIds] = useState<Set<number>>(new Set());
-  const [isLibraryHovering, setIsLibraryHovering] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{
     label: string;
     done: number;
@@ -180,7 +175,6 @@ function HomePageContent() {
   const metaLoadInFlightRef = useRef<string | null>(null);
   const isApplyingRouteQueryStateRef = useRef(false);
   const importAgentsInputRef = useRef<HTMLInputElement | null>(null);
-  const importReviewBundleInputRef = useRef<HTMLInputElement | null>(null);
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -958,8 +952,7 @@ function HomePageContent() {
     }
   }
 
-  async function handleBulkArchive(archived: boolean) {
-    const ids = Array.from(selectedLibraryIds);
+  async function handleBulkArchive(archived: boolean, ids: number[]) {
     if (ids.length === 0) {
       setStatusMessage('Select one or more documents first.');
       return;
@@ -979,7 +972,6 @@ function HomePageContent() {
           total: ids.length
         });
       }
-      setSelectedLibraryIds(new Set());
       setStatusMessage(archived ? 'Selected documents archived.' : 'Selected documents restored.');
       await refreshAll();
     } catch (error) {
@@ -989,8 +981,7 @@ function HomePageContent() {
     }
   }
 
-  async function handleBulkDelete() {
-    const ids = Array.from(selectedLibraryIds);
+  async function handleBulkDelete(ids: number[]) {
     if (ids.length === 0) {
       setStatusMessage('Select one or more documents first.');
       return;
@@ -1014,7 +1005,6 @@ function HomePageContent() {
         setVersions([]);
         setComments([]);
       }
-      setSelectedLibraryIds(new Set());
       setStatusMessage('Selected documents deleted.');
       await refreshAll();
     } catch (error) {
@@ -1024,10 +1014,7 @@ function HomePageContent() {
     }
   }
 
-  async function handleBulkRerun() {
-    const targets = filteredLibraryWithSearch.filter(
-      (entry) => selectedLibraryIds.has(entry.id) && Boolean(entry.latest_version_id)
-    );
+  async function handleBulkRerun(targets: DocumentLibraryEntry[]) {
     if (targets.length === 0) {
       setStatusMessage('Select documents with at least one version to re-run review.');
       return;
@@ -1048,7 +1035,6 @@ function HomePageContent() {
         });
         setBulkProgress({ label: 'Queueing re-review', done: idx + 1, total: targets.length });
       }
-      setSelectedLibraryIds(new Set());
       setStatusMessage(`Queued re-review for ${targets.length} document(s).`);
       await refreshAll();
     } catch (error) {
@@ -1472,23 +1458,6 @@ function HomePageContent() {
     return map;
   }, [personas]);
 
-  const filteredLibrary = useMemo(() => {
-    if (libraryFilter === 'archived') {
-      return libraryEntries.filter((entry) => entry.is_archived);
-    }
-    const active = libraryEntries.filter((entry) => !entry.is_archived);
-    if (libraryFilter === 'all') return active;
-    if (libraryFilter === 'needs') {
-      return active.filter((entry) => entry.needs_review);
-    }
-    return active.filter((entry) => !entry.needs_review);
-  }, [libraryEntries, libraryFilter]);
-
-  const filteredLibraryWithSearch = useMemo(() => {
-    if (!librarySearch.trim()) return filteredLibrary;
-    const query = librarySearch.trim().toLowerCase();
-    return filteredLibrary.filter((entry) => entry.title.toLowerCase().includes(query));
-  }, [filteredLibrary, librarySearch]);
 
   const filteredMetaComments = useMemo(() => {
     const comments = metaReviewRun?.comments ?? [];
@@ -1750,12 +1719,6 @@ function HomePageContent() {
     });
   }, [activeCommentId, docMode, highlightTick]);
 
-  const allFilteredSelected = useMemo(() => {
-    if (filteredLibraryWithSearch.length === 0) return false;
-    return filteredLibraryWithSearch.every((entry) => selectedLibraryIds.has(entry.id));
-  }, [filteredLibraryWithSearch, selectedLibraryIds]);
-
-  const showSelectionControls = isLibraryHovering || selectedLibraryIds.size > 0;
   const hoverCenterIndex = useMemo(
     () => visibleComments.findIndex((comment) => comment.id === hoveredCommentId),
     [visibleComments, hoveredCommentId]
@@ -3439,269 +3402,17 @@ function HomePageContent() {
       )}
 
       {showLibrary && (
-        <div className="library-overlay">
-          <div className="library-shell">
-            <div className="library-header">
-              <div>
-                <div className="library-title">Review Ledger</div>
-                <div className="library-sub">
-                  Saved reviews stay with each version. Run a new review only when you ask.
-                </div>
-              </div>
-              <div className="library-actions">
-                <button
-                  className="ghost-button"
-                  type="button"
-                  disabled={isBundleImporting}
-                  onClick={() => importReviewBundleInputRef.current?.click()}
-                >
-                  {isBundleImporting ? 'Importing…' : 'Import Bundle'}
-                </button>
-                <input
-                  ref={importReviewBundleInputRef}
-                  type="file"
-                  accept="application/json,.json,application/zip,.zip"
-                  multiple
-                  hidden
-                  onChange={(event) => {
-                    if (event.target.files) {
-                      void handleImportReviewBundleFiles(event.target.files);
-                    }
-                    event.target.value = '';
-                  }}
-                />
-                <div className="library-filters">
-                  <button
-                    className={`filter-chip ${libraryFilter === 'all' ? 'active' : ''}`}
-                    type="button"
-                    onClick={() => setLibraryFilter('all')}
-                  >
-                    All
-                  </button>
-                  <button
-                    className={`filter-chip ${libraryFilter === 'needs' ? 'active' : ''}`}
-                    type="button"
-                    onClick={() => setLibraryFilter('needs')}
-                  >
-                    Needs Review
-                  </button>
-                  <button
-                    className={`filter-chip ${libraryFilter === 'reviewed' ? 'active' : ''}`}
-                    type="button"
-                    onClick={() => setLibraryFilter('reviewed')}
-                  >
-                    Reviewed
-                  </button>
-                  <button
-                    className={`filter-chip ${libraryFilter === 'archived' ? 'active' : ''}`}
-                    type="button"
-                    onClick={() => setLibraryFilter('archived')}
-                  >
-                    Archived
-                  </button>
-                </div>
-                <input
-                  className="library-search"
-                  placeholder="Search documents"
-                  value={librarySearch}
-                  onChange={(event) => setLibrarySearch(event.target.value)}
-                />
-              </div>
-            </div>
-
-            {(showSelectionControls || bulkProgress) && (
-              <div className="bulk-bar">
-              <label className="bulk-select-all">
-                <input
-                  type="checkbox"
-                  checked={allFilteredSelected}
-                  disabled={bulkProgress !== null || !showSelectionControls}
-                  onChange={(event) => {
-                    const next = new Set(selectedLibraryIds);
-                    if (event.target.checked) {
-                      for (const entry of filteredLibraryWithSearch) {
-                        next.add(entry.id);
-                      }
-                    } else {
-                      for (const entry of filteredLibraryWithSearch) {
-                        next.delete(entry.id);
-                      }
-                    }
-                    setSelectedLibraryIds(next);
-                  }}
-                />
-                Select all ({filteredLibraryWithSearch.length})
-              </label>
-              {bulkProgress && (
-                <div className="bulk-progress">
-                  {bulkProgress.label} {bulkProgress.done}/{bulkProgress.total}
-                </div>
-              )}
-              <div className="bulk-actions">
-                <button
-                  className="ghost-button"
-                  type="button"
-                  disabled={selectedLibraryIds.size === 0 || bulkProgress !== null}
-                  onClick={() => void handleBulkArchive(true)}
-                >
-                  Archive Selected
-                </button>
-                <button
-                  className="ghost-button"
-                  type="button"
-                  disabled={selectedLibraryIds.size === 0 || bulkProgress !== null}
-                  onClick={() => void handleBulkArchive(false)}
-                >
-                  Restore Selected
-                </button>
-                <button
-                  className="ghost-button"
-                  type="button"
-                  disabled={selectedLibraryIds.size === 0 || bulkProgress !== null}
-                  onClick={() => void handleBulkRerun()}
-                >
-                  Re-run Selected
-                </button>
-                <button
-                  className="ghost-button danger-button"
-                  type="button"
-                  disabled={selectedLibraryIds.size === 0 || bulkProgress !== null}
-                  onClick={() => void handleBulkDelete()}
-                >
-                  Delete Selected
-                </button>
-              </div>
-              </div>
-            )}
-
-            <div
-              className="library-grid"
-              onMouseEnter={() => setIsLibraryHovering(true)}
-              onMouseLeave={() => setIsLibraryHovering(false)}
-            >
-              {filteredLibraryWithSearch.length === 0 && (
-                <div className="subtle">No documents yet.</div>
-              )}
-              {filteredLibraryWithSearch.map((entry) => {
-                const statusLabel = entry.is_archived
-                  ? 'Archived'
-                  : entry.needs_review
-                    ? 'Needs Review'
-                    : 'Reviewed';
-                const versionLabel = entry.latest_version_label ?? 'No versions yet';
-                const lastEdited = entry.latest_version_created_at
-                  ? new Date(entry.latest_version_created_at).toLocaleString()
-                  : '—';
-                const lastReviewed = entry.latest_review_completed_at
-                  ? new Date(entry.latest_review_completed_at).toLocaleString()
-                  : '—';
-                return (
-                  <div key={entry.id} className={`library-card ${entry.needs_review ? 'needs' : 'ready'}`}>
-                    <div className="review-ribbon" />
-                    <div className="library-card-body">
-                      <button
-                        className="library-delete-btn"
-                        type="button"
-                        disabled={bulkProgress !== null}
-                        onClick={() => void handleDeleteDocument(entry.id, entry.title)}
-                        aria-label={`Delete ${entry.title}`}
-                      >
-                        ×
-                      </button>
-                      <label className={`library-select ${showSelectionControls ? 'visible' : ''}`}>
-                        <input
-                          type="checkbox"
-                          checked={selectedLibraryIds.has(entry.id)}
-                          disabled={bulkProgress !== null || !showSelectionControls}
-                          onChange={(event) => {
-                            const next = new Set(selectedLibraryIds);
-                            if (event.target.checked) {
-                              next.add(entry.id);
-                            } else {
-                              next.delete(entry.id);
-                            }
-                            setSelectedLibraryIds(next);
-                          }}
-                        />
-                      </label>
-                      <div className="library-card-summary">
-                        <div className="library-card-title">{entry.title}</div>
-                        <div className="library-card-meta">
-                          <span
-                            className={`status-pill ${
-                              entry.is_archived ? 'neutral' : entry.needs_review ? 'warn' : 'ok'
-                            }`}
-                          >
-                            {statusLabel}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="library-card-detail">
-                        <div className="library-card-meta">
-                          <span className="meta-pill">{versionLabel}</span>
-                        </div>
-                        <div className="library-timeline">
-                          <div>
-                            <div className="timeline-label">Last edit</div>
-                            <div className="timeline-value">{lastEdited}</div>
-                          </div>
-                          <div>
-                            <div className="timeline-label">Last review</div>
-                            <div className="timeline-value">{lastReviewed}</div>
-                          </div>
-                        </div>
-                        <div className="library-card-actions">
-                        <button
-                          className="ghost-button"
-                          type="button"
-                          onClick={() => {
-                            router.push(`/?doc=${entry.id}`);
-                          }}
-                        >
-                          Open
-                        </button>
-                          <button
-                            className="primary-button"
-                            type="button"
-                            disabled={!entry.latest_version_id}
-                            onClick={() => {
-                              if (!entry.latest_version_id) return;
-                              router.push(`/?doc=${entry.id}&run=1`);
-                            }}
-                          >
-                            Run Review
-                          </button>
-                          <button
-                            className="ghost-button"
-                            type="button"
-                            disabled={!entry.latest_version_id}
-                            onClick={() => {
-                              if (!entry.latest_version_id) return;
-                              const confirmed = window.confirm(
-                                `Start a new review run for "${entry.title}"?`
-                              );
-                              if (!confirmed) return;
-                              router.push(`/?doc=${entry.id}&run=1`);
-                            }}
-                          >
-                            Re-run
-                          </button>
-                          <button
-                            className="ghost-button"
-                            type="button"
-                            onClick={() => void handleSetArchived(entry.id, !entry.is_archived)}
-                          >
-                            {entry.is_archived ? 'Restore' : 'Archive'}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+        <LibraryPanel
+          libraryEntries={libraryEntries}
+          bulkProgress={bulkProgress}
+          isBundleImporting={isBundleImporting}
+          onImportBundle={handleImportReviewBundleFiles}
+          onBulkArchive={handleBulkArchive}
+          onBulkRerun={handleBulkRerun}
+          onBulkDelete={handleBulkDelete}
+          onDeleteDocument={handleDeleteDocument}
+          onSetArchived={handleSetArchived}
+        />
       )}
 
       {showHistory && (
