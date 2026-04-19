@@ -2959,14 +2959,28 @@ function HomePageContent() {
                             : 'Review needed'}
                       </div>
                       <div className="meta-verdict-copy">
-                        {metaSummary.verdict === 'clean'
-                          ? 'No significant issues found.'
-                          : metaSummary.verdict === 'problems'
-                            ? 'Do not approve, send, or ship without fixing these.'
-                            : 'A few things are worth your attention.'}
+                        {metaSummary.bottom_line && metaSummary.bottom_line.trim().length > 0
+                          ? metaSummary.bottom_line
+                          : metaSummary.verdict === 'clean'
+                            ? 'No significant issues found.'
+                            : metaSummary.verdict === 'problems'
+                              ? 'Do not approve, send, or ship without fixing these.'
+                              : 'A few things are worth your attention.'}
                       </div>
                     </div>
                   </div>
+                  {metaSummary.top_blockers && metaSummary.top_blockers.length > 0 && (
+                    <div className="meta-summary-block">
+                      <div className="meta-summary-title">Top blockers</div>
+                      <ul className="meta-blocker-list">
+                        {metaSummary.top_blockers.map((blocker, index) => (
+                          <li key={`meta-blocker-${index}`} className="meta-blocker-item">
+                            {blocker}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   {metaSummary.attention_points.length > 0 && (
                     <div className="meta-summary-block">
                       <div className="meta-summary-title">Top attention points</div>

@@ -263,9 +263,12 @@ export type MetaAttentionPointRead = {
 
 export type MetaReviewSummaryRead = {
   verdict: 'clean' | 'review_needed' | 'problems';
+  bottom_line?: string | null;
+  top_blockers?: string[];
   attention_points: MetaAttentionPointRead[];
   clean_sections: string[];
   clean_statement: string;
+  synthesized_by_llm?: boolean;
 };
 
 export type MetaReviewRunRead = {

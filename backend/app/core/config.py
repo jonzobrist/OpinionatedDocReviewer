@@ -132,6 +132,12 @@ class Settings(BaseSettings):
     TRUST_PROXY_HEADERS: bool = False
     PROXY_TRUSTED_IPS: str = "127.0.0.1"
     META_AUTO_SYNTHESIS_ENABLED: bool = True
+    # Enables the LLM-synthesized verdict pass that produces a
+    # bottom-line summary and top-blockers list alongside the rule-based
+    # verdict threshold. When False (or the provider fails), the summary
+    # still renders using the deterministic rule-based verdict so the UI
+    # stays usable in air-gapped / degraded scenarios.
+    META_VERDICT_USE_LLM: bool = True
     META_AGENT_NAME: str = "Meta Reviewer"
     META_AGENT_DESCRIPTION: str = "Synthesizes reviewer comments into ranked directives."
     META_AGENT_SYSTEM_PROMPT: str = (
