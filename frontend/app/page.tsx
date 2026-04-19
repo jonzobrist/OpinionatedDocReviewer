@@ -1483,6 +1483,29 @@ function HomePageContent() {
       });
   }, [metaReviewRun, metaCategoryFilter]);
   const metaSummary = metaReviewRun?.summary ?? null;
+  const [showAllDirectives, setShowAllDirectives] = useState(false);
+  // How many directive cards to render by default. Matches the cap on
+  // attention_points in the verdict summary so the two surfaces stay
+  // consistent: the top-N the system considers worth promoting are both
+  // reflected in the compact summary and the detailed cards below it.
+  const META_DIRECTIVE_DEFAULT_LIMIT = 5;
+  // Auto-expand the full directive list whenever the user has focused a
+  // specific directive (click, URL drill-down, keyboard) past the
+  // default window — the card needs to be in the DOM for
+  // scroll-into-view and the selected highlighting to have an effect.
+  const focusedIndex = focusedMetaCommentId
+    ? filteredMetaComments.findIndex((item) => item.id === focusedMetaCommentId)
+    : -1;
+  const hoveredIndex = hoveredMetaCommentId
+    ? filteredMetaComments.findIndex((item) => item.id === hoveredMetaCommentId)
+    : -1;
+  const focusRequiresExpansion =
+    focusedIndex >= META_DIRECTIVE_DEFAULT_LIMIT || hoveredIndex >= META_DIRECTIVE_DEFAULT_LIMIT;
+  const mustShowAllDirectives = showAllDirectives || focusRequiresExpansion;
+  const visibleMetaDirectives = mustShowAllDirectives
+    ? filteredMetaComments
+    : filteredMetaComments.slice(0, META_DIRECTIVE_DEFAULT_LIMIT);
+  const hiddenDirectiveCount = filteredMetaComments.length - visibleMetaDirectives.length;
 
   const activeCommentId = focusedCommentId ?? hoveredCommentId;
   const activeMetaCommentId = commentViewMode === 'meta' ? focusedMetaCommentId ?? hoveredMetaCommentId : null;
@@ -3116,7 +3139,7 @@ function HomePageContent() {
               {commentViewMode === 'meta' &&
                 !isMetaLoading &&
                 metaViewState === 'ready' &&
-                filteredMetaComments.map((metaComment, index) => {
+                visibleMetaDirectives.map((metaComment, index) => {
                   const topSource = metaComment.sources[0];
                   const pseudoColor = colorForPriority(metaComment.priority);
                   const isFloatingMetaActive =
@@ -3220,6 +3243,22 @@ function HomePageContent() {
                     </div>
                   );
                 })}
+              {commentViewMode === 'meta' &&
+                !isMetaLoading &&
+                metaViewState === 'ready' &&
+                (hiddenDirectiveCount > 0 || mustShowAllDirectives) &&
+                filteredMetaComments.length > META_DIRECTIVE_DEFAULT_LIMIT && (
+                  <button
+                    type="button"
+                    className="ghost-button meta-directive-toggle"
+                    onClick={() => setShowAllDirectives((prev) => !prev)}
+                    aria-expanded={mustShowAllDirectives}
+                  >
+                    {mustShowAllDirectives
+                      ? 'Hide secondary directives'
+                      : `Show ${hiddenDirectiveCount} more directives`}
+                  </button>
+                )}
             </div>
             {commentViewMode === 'individual' &&
               floatingComment &&
