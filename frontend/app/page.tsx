@@ -55,7 +55,6 @@ import {
   SystemConfigRead,
   SystemStatus
 } from '../src/lib/types';
-import { useReviewPolling } from '../src/lib/hooks/useReviewPolling';
 
 const POLL_INTERVAL_MS = 1200;
 const META_STATUS_POLL_MAX_ATTEMPTS = 8;
@@ -247,6 +246,14 @@ function HomePageContent() {
   const hoveredMetaCommentIdRef = useRef<number | null>(null);
   const hoverAlignFrameRef = useRef<number | null>(null);
   const handledRouteIntentRef = useRef<string | null>(null);
+  // Selection-generation: bumped on every document switch. Async fetches
+  // capture the value at call time and drop their response if the user
+  // has switched to a different document before the response returns.
+  // This prevents stale polling/refresh responses from overwriting fresh
+  // state when the user rapidly switches between documents.
+  const selectedVersionIdRef = useRef<number | null>(null);
+  const selectedReviewJobIdRef = useRef<number | null>(null);
+  const selectionGenerationRef = useRef(0);
   // Dedupe key for in-flight meta auto-loads so polling-driven status
   // changes do not fire concurrent duplicate requests.
   const metaLoadInFlightRef = useRef<string | null>(null);
@@ -389,15 +396,27 @@ function HomePageContent() {
     void refreshAgentImportPreview(pendingAgentImport);
   }, [agentImportConflictPolicy]);
 
-  const { generationRef: selectionGenerationRef } = useReviewPolling({
-    versionId: selectedVersionId,
-    reviewJobId: selectedReviewJobId,
-    intervalMs: POLL_INTERVAL_MS,
-    onPoll: (vid, jid) => {
+  useEffect(() => {
+    selectedVersionIdRef.current = selectedVersionId;
+    selectionGenerationRef.current += 1;
+  }, [selectedVersionId]);
+
+  useEffect(() => {
+    selectedReviewJobIdRef.current = selectedReviewJobId;
+  }, [selectedReviewJobId]);
+
+  useEffect(() => {
+    // Single run-once poller reads from refs so fast doc-switches do not
+    // leave ghost intervals bound to stale (versionId, reviewJobId) values.
+    const interval = setInterval(() => {
+      const vid = selectedVersionIdRef.current;
+      if (!vid) return;
+      const jid = selectedReviewJobIdRef.current;
       void loadComments(vid, true, jid);
       void loadReviewJobsSnapshot(vid);
-    },
-  });
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     setMetaReviewRun(null);
@@ -835,7 +854,7 @@ function HomePageContent() {
     selectedId: number | null;
   }> {
     const generationAtCall = selectionGenerationRef.current;
-    const currentSelected = selectedReviewJobId;
+    const currentSelected = selectedReviewJobIdRef.current;
     try {
       const jobs = await apiFetch<ReviewJobRead[]>(`/review-jobs?document_version_id=${versionId}`);
       // Drop the response if the user has switched documents in the meantime.
