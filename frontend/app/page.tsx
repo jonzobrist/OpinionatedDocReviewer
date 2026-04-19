@@ -44,6 +44,7 @@ import {
 import { MermaidDiagram } from './components/MermaidDiagram';
 import { AdminPanel } from './components/AdminPanel';
 import { SystemPanel } from './components/SystemPanel';
+import { HistoryPanel } from './components/HistoryPanel';
 
 const POLL_INTERVAL_MS = 1200;
 const META_STATUS_POLL_MAX_ATTEMPTS = 8;
@@ -92,9 +93,6 @@ function HomePageContent() {
   const [reviewJobs, setReviewJobs] = useState<ReviewJobRead[]>([]);
   const [personas, setPersonas] = useState<PersonaRead[]>([]);
   const [history, setHistory] = useState<DocumentCommitRead[]>([]);
-  const [historyJobs, setHistoryJobs] = useState<ReviewJobRead[]>([]);
-  const [historyDocumentId, setHistoryDocumentId] = useState<number | null>(null);
-  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
@@ -279,17 +277,6 @@ function HomePageContent() {
     setAgentThemes(loadAgentThemes());
     void refreshAll();
   }, []);
-
-  useEffect(() => {
-    if (!showHistory) return;
-    if (historyDocumentId === null) {
-      const preferredId = selectedDocumentId ?? libraryEntries[0]?.id ?? null;
-      setHistoryDocumentId(preferredId);
-      void refreshHistoryPanel(preferredId);
-      return;
-    }
-    void refreshHistoryPanel(historyDocumentId);
-  }, [showHistory, historyDocumentId, selectedDocumentId, libraryEntries]);
 
   useEffect(() => {
     if (!showAgents) return;
@@ -636,32 +623,6 @@ function HomePageContent() {
       setHistory(commits);
     } catch (error) {
       setHistory([]);
-    }
-  }
-
-  async function loadHistoryJobs() {
-    try {
-      const jobs = await apiFetch<ReviewJobRead[]>('/review-jobs');
-      const safeJobs = Array.isArray(jobs) ? jobs : [];
-      safeJobs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      setHistoryJobs(safeJobs);
-    } catch (error) {
-      setErrorMessage(normalizeError(error));
-      setHistoryJobs([]);
-    }
-  }
-
-  async function refreshHistoryPanel(documentId: number | null) {
-    setIsHistoryLoading(true);
-    try {
-      await loadHistoryJobs();
-      if (documentId) {
-        await loadHistory(documentId);
-      } else {
-        setHistory([]);
-      }
-    } finally {
-      setIsHistoryLoading(false);
     }
   }
 
@@ -3744,109 +3705,12 @@ function HomePageContent() {
       )}
 
       {showHistory && (
-        <div className="library-overlay">
-          <div className="library-shell">
-            <div className="library-header">
-              <div>
-                <div className="library-title">History</div>
-                <div className="library-sub">
-                  Review runs across your workspace and Git-backed document commits.
-                </div>
-              </div>
-              <div className="library-actions">
-                <select
-                  className="input compact"
-                  value={historyDocumentId ?? ''}
-                  onChange={(event) => {
-                    const raw = event.target.value;
-                    if (!raw) {
-                      setHistoryDocumentId(null);
-                      return;
-                    }
-                    const next = Number(raw);
-                    setHistoryDocumentId(Number.isFinite(next) ? next : null);
-                  }}
-                >
-                  <option value="">No document selected</option>
-                  {libraryEntries.map((entry) => (
-                    <option key={`history-doc-${entry.id}`} value={entry.id}>
-                      {entry.title}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="ghost-button"
-                  type="button"
-                  onClick={() => void refreshHistoryPanel(historyDocumentId)}
-                  disabled={isHistoryLoading}
-                >
-                  {isHistoryLoading ? 'Refreshing…' : 'Refresh'}
-                </button>
-                {historyDocumentId && (
-                  <button
-                    className="primary-button"
-                    type="button"
-                    onClick={() => router.push(`/?doc=${historyDocumentId}`)}
-                  >
-                    Open Document
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="admin-grid">
-              <section className="admin-card wide">
-                <div className="drawer-title">Review Runs</div>
-                <div className="history-list">
-                  {historyJobs.length === 0 && (
-                    <div className="subtle">No review runs yet.</div>
-                  )}
-                  {historyJobs.map((job) => (
-                    <div key={`history-job-${job.id}`} className="history-item">
-                      <div>
-                        <div className="history-msg">
-                          #{job.id} {job.status} · version {job.document_version_id}
-                        </div>
-                        <div className="history-time">
-                          {new Date(job.created_at).toLocaleString()}
-                          {job.completed_at
-                            ? ` · completed ${new Date(job.completed_at).toLocaleString()}`
-                            : ''}
-                        </div>
-                      </div>
-                      <span className="pill">
-                        {job.provider}/{job.model}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="admin-card wide">
-                <div className="drawer-title">Document Commits</div>
-                <div className="history-list">
-                  {!historyDocumentId && (
-                    <div className="subtle">Select a document to view commit history.</div>
-                  )}
-                  {historyDocumentId && history.length === 0 && (
-                    <div className="subtle">No commits yet for this document.</div>
-                  )}
-                  {history.map((commit) => (
-                    <div key={`history-commit-${commit.sha}`} className="history-item">
-                      <div>
-                        <div className="history-msg">{commit.message}</div>
-                        <div className="history-time">
-                          {new Date(commit.authored_at).toLocaleString()}
-                        </div>
-                      </div>
-                      <span className="pill">{commit.sha.slice(0, 7)}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            </div>
-          </div>
-        </div>
+        <HistoryPanel
+          libraryEntries={libraryEntries}
+          selectedDocumentId={selectedDocumentId}
+          onStatus={setStatusMessage}
+          onError={setErrorMessage}
+        />
       )}
 
       {showAgents && (
