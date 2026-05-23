@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 MetaReviewStatus = Literal["queued", "running", "completed", "failed"]
 MetaReviewResolution = Literal["reused", "created"]
+MetaReviewVerdict = Literal["clean", "review_needed", "problems"]
 
 
 class MetaReviewCreate(BaseModel):
@@ -61,6 +62,34 @@ class MetaCommentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MetaAttentionPointRead(BaseModel):
+    meta_comment_id: int
+    location: str
+    reason: str
+    priority: str
+    start_offset: int
+    end_offset: int
+    source_comment_ids: list[int] = Field(default_factory=list)
+
+
+class MetaReviewSummaryRead(BaseModel):
+    verdict: MetaReviewVerdict
+    # One-sentence human-readable rationale for the verdict. Emitted by
+    # the LLM synthesis pass when available; None when the rule-based
+    # fallback runs (no LLM provider configured, provider down, etc.).
+    bottom_line: str | None = None
+    # Up to three short blocker summaries the LLM picked as the most
+    # critical issues driving the verdict, independent of attention_points
+    # which are ranked by score. Empty list in the fallback path.
+    top_blockers: list[str] = Field(default_factory=list)
+    attention_points: list[MetaAttentionPointRead] = Field(default_factory=list)
+    clean_sections: list[str] = Field(default_factory=list)
+    clean_statement: str
+    # True when verdict + bottom_line + top_blockers were produced by an
+    # LLM synthesis pass; False when the rule-based fallback was used.
+    synthesized_by_llm: bool = False
+
+
 class MetaReviewRunRead(BaseModel):
     id: int
     tenant_id: str
@@ -80,6 +109,7 @@ class MetaReviewRunRead(BaseModel):
     error_details: MetaReviewErrorDetailRead | None = None
     created_at: datetime
     comments: list[MetaCommentRead]
+    summary: MetaReviewSummaryRead | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -15,6 +15,7 @@ from app.db import models
 from app.reviews.llm_provider import (
     LLMProviderError,
     generate_completion,
+    generate_embeddings,
     get_model_label,
     get_provider_name,
 )
@@ -36,6 +37,7 @@ CRITICAL_HINTS = (
 GROUP_ADJACENCY_CHARS = 120
 MAX_META_COMMENTS_INPUT = 2000
 MAX_META_GROUPS = 500
+MAX_META_ATTENTION_POINTS = 5
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 PRIORITY_SCORE = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
@@ -209,11 +211,15 @@ def _build_prompt(group: CommentGroup, persona_map: dict[int, models.Persona], d
         "Return ONLY a valid JSON array; no markdown; no prose.\n"
         "Each item must include keys exactly: content, category, priority, impact, effort, confidence, why_now, recommended_change, verification_step, status, assignee, due_at, contributing_reviewers, location.\n"
         "Rules:\n"
-        "- 1-2 sentences max, imperative action; no hedging.\n"
+        "- content must be one sentence, under 160 characters, and describe the document issue at this location only.\n"
+        "- Do not summarize reviewer comments or mention reviewers in content.\n"
+        "- Be specific about the document problem and why it needs attention now.\n"
+        "- Return at most 1 directive for this location unless there are clearly separate issues.\n"
         "- Collapse duplicates into one directive.\n"
         "- Preserve minority critical/security issues even if only one reviewer raised them.\n"
         "- If reviewers conflict, state conflict briefly and pick stronger recommendation.\n"
         "- Omit non-actionable/noise comments.\n"
+        "- Set why_now, recommended_change, verification_step, assignee, due_at to null unless essential.\n"
         "- category: structure|clarity|technical|security|accessibility|style\n"
         "- priority: critical|high|medium|low\n"
         "- impact: high|medium|low\n"
@@ -420,15 +426,16 @@ def synthesize_group(
     joined = " | ".join(comment.text.strip() for comment in group.comments if comment.text.strip())
     if not joined:
         return [], False
+    primary = next((comment.text.strip() for comment in group.comments if comment.text.strip()), "")
     fallback = {
-        "content": joined,
+        "content": primary or joined,
         "category": "clarity",
         "priority": "medium",
         "impact": "medium",
         "effort": "medium",
         "confidence": 0.5,
         "why_now": None,
-        "recommended_change": joined,
+        "recommended_change": None,
         "verification_step": "Confirm the updated text addresses all cited reviewer concerns.",
         "status": "open",
         "assignee": None,
@@ -451,7 +458,28 @@ def _tokenize(value: str) -> set[str]:
     return {token for token in TOKEN_RE.findall((value or "").lower()) if len(token) > 2}
 
 
+def _cosine_similarity(left: list[float], right: list[float]) -> float:
+    if not left or not right or len(left) != len(right):
+        return 0.0
+    dot = 0.0
+    left_norm = 0.0
+    right_norm = 0.0
+    for a, b in zip(left, right):
+        dot += a * b
+        left_norm += a * a
+        right_norm += b * b
+    if left_norm <= 0 or right_norm <= 0:
+        return 0.0
+    return dot / ((left_norm**0.5) * (right_norm**0.5))
+
+
 def _directive_similarity(left: MetaDirectiveCandidate, right: MetaDirectiveCandidate) -> float:
+    """Token-Jaccard similarity.
+
+    Kept as the deterministic fallback when embeddings are disabled or
+    the provider is unavailable. Embedding-driven callers should use
+    _directive_similarity_with_embeddings instead.
+    """
     left_tokens = _tokenize(left.content)
     right_tokens = _tokenize(right.content)
     if not left_tokens or not right_tokens:
@@ -462,6 +490,26 @@ def _directive_similarity(left: MetaDirectiveCandidate, right: MetaDirectiveCand
         return 0.0
 
     text_score = len(overlap) / len(union)
+    location_span = max(left.end_offset, right.end_offset) - min(left.start_offset, right.start_offset)
+    near = 1.0 if location_span <= GROUP_ADJACENCY_CHARS else 0.0
+    same_category = 1.0 if left.category == right.category else 0.0
+    return (text_score * 0.7) + (near * 0.2) + (same_category * 0.1)
+
+
+def _directive_similarity_with_embedding(
+    left: MetaDirectiveCandidate,
+    right: MetaDirectiveCandidate,
+    left_embedding: list[float],
+    right_embedding: list[float],
+) -> float:
+    """Cosine-on-embeddings text score, keeping location + category boosts.
+
+    Embedding similarity captures semantic duplicates (same meaning, new
+    wording) that token-Jaccard misses. Location proximity and category
+    match still contribute so two identical-sounding directives on
+    unrelated sections don't collapse into one.
+    """
+    text_score = _cosine_similarity(left_embedding, right_embedding)
     location_span = max(left.end_offset, right.end_offset) - min(left.start_offset, right.start_offset)
     near = 1.0 if location_span <= GROUP_ADJACENCY_CHARS else 0.0
     same_category = 1.0 if left.category == right.category else 0.0
@@ -497,22 +545,99 @@ def _merge_directives(primary: MetaDirectiveCandidate, duplicate: MetaDirectiveC
     return primary
 
 
+def _maybe_compute_embeddings(
+    candidates: list[MetaDirectiveCandidate],
+) -> dict[int, list[float]] | None:
+    """Return embeddings keyed by candidate index, or None on failure.
+
+    None means "use the Jaccard path" — that's the deliberate
+    fallback when the provider is not OpenAI, is unreachable, or
+    returns a mismatched count. The dedupe caller never fails because
+    of embeddings; it only skips the upgrade.
+    """
+    if not getattr(settings, "META_DEDUPE_USE_EMBEDDINGS", False):
+        return None
+    try:
+        texts = [candidate.content or "" for candidate in candidates]
+        vectors = generate_embeddings(texts)
+    except LLMProviderError as exc:
+        logger.info("meta_embedding_dedupe_skipped reason=provider_error detail=%s", exc)
+        return None
+    except Exception:
+        logger.exception("meta_embedding_dedupe_skipped reason=unexpected")
+        return None
+    if len(vectors) != len(candidates):
+        logger.info(
+            "meta_embedding_dedupe_skipped reason=length_mismatch expected=%s got=%s",
+            len(candidates),
+            len(vectors),
+        )
+        return None
+    embeddings: dict[int, list[float]] = {}
+    for idx, vector in enumerate(vectors):
+        if vector:
+            embeddings[idx] = vector
+    # Require at least half the candidates to have non-empty vectors; below
+    # that the dedupe quality drops below what Jaccard offers.
+    if len(embeddings) < max(1, len(candidates) // 2):
+        logger.info(
+            "meta_embedding_dedupe_skipped reason=too_many_empty filled=%s total=%s",
+            len(embeddings),
+            len(candidates),
+        )
+        return None
+    return embeddings
+
+
 def dedupe_directives(candidates: list[MetaDirectiveCandidate]) -> list[MetaDirectiveCandidate]:
     if not candidates:
         return []
 
+    # Use a stable id->candidate mapping so we can reference the
+    # precomputed embedding for each candidate, even as the deduped
+    # list is reordered/merged during the sweep.
+    sorted_candidates = sorted(
+        candidates, key=lambda item: (item.order_index, -item.rank_score)
+    )
+    embeddings_by_index: dict[int, list[float]] | None = _maybe_compute_embeddings(
+        sorted_candidates
+    )
+    use_embeddings = embeddings_by_index is not None
+
+    # Map each candidate object (by identity) to its embedding so that
+    # _merge_directives mutating `primary` does not break the lookup.
+    candidate_embeddings: dict[int, list[float]] = {}
+    if embeddings_by_index is not None:
+        for idx, candidate in enumerate(sorted_candidates):
+            embedding = embeddings_by_index.get(idx)
+            if embedding:
+                candidate_embeddings[id(candidate)] = embedding
+
     deduped: list[MetaDirectiveCandidate] = []
-    threshold = settings.META_GLOBAL_DEDUPE_THRESHOLD
-    for candidate in sorted(candidates, key=lambda item: (item.order_index, -item.rank_score)):
+    if use_embeddings:
+        threshold = settings.META_DEDUPE_EMBEDDING_THRESHOLD
+    else:
+        threshold = settings.META_GLOBAL_DEDUPE_THRESHOLD
+
+    for candidate in sorted_candidates:
+        candidate_embedding = candidate_embeddings.get(id(candidate))
         duplicate_idx = None
         for idx, existing in enumerate(deduped):
-            if _directive_similarity(candidate, existing) >= threshold:
+            existing_embedding = candidate_embeddings.get(id(existing))
+            if use_embeddings and candidate_embedding and existing_embedding:
+                score = _directive_similarity_with_embedding(
+                    candidate, existing, candidate_embedding, existing_embedding
+                )
+            else:
+                score = _directive_similarity(candidate, existing)
+            if score >= threshold:
                 duplicate_idx = idx
                 break
         if duplicate_idx is None:
             deduped.append(candidate)
         else:
-            deduped[duplicate_idx] = _merge_directives(deduped[duplicate_idx], candidate)
+            merged = _merge_directives(deduped[duplicate_idx], candidate)
+            deduped[duplicate_idx] = merged
 
     deduped.sort(key=lambda item: (-item.rank_score, item.start_offset, item.order_index))
     for index, candidate in enumerate(deduped):
@@ -779,7 +904,7 @@ def ensure_meta_review_run(
                 )
                 order_index += 1
 
-        deduped = dedupe_directives(candidates)
+        deduped = dedupe_directives(candidates)[:MAX_META_ATTENTION_POINTS]
 
         for candidate in deduped:
             meta_comment = models.MetaComment(

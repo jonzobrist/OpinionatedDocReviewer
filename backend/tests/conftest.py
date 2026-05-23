@@ -22,6 +22,15 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 @pytest.fixture()
 def client(monkeypatch):
     monkeypatch.setattr(settings, "AUTH_MODE", "header")
+    # Default tests off the LLM verdict pass so the existing route
+    # integration tests do not reach out to a real OpenAI API. Tests
+    # that exercise the LLM verdict explicitly opt in and patch
+    # generate_completion themselves.
+    monkeypatch.setattr(settings, "META_VERDICT_USE_LLM", False)
+    # Also keep the embedding-driven dedupe off so existing tests do not
+    # hit the embedding provider. Tests exercising the embedding path
+    # opt in and patch generate_embeddings themselves.
+    monkeypatch.setattr(settings, "META_DEDUPE_USE_EMBEDDINGS", False)
     monkeypatch.setattr(
         "app.api.review_jobs.enqueue_review_job",
         lambda job_id, tenant_id: None,

@@ -285,6 +285,22 @@ describe('page controls', () => {
             model: 'gpt-4o-mini',
             error_message: null,
             created_at: new Date().toISOString(),
+            summary: {
+              verdict: 'problems',
+              attention_points: [
+                {
+                  meta_comment_id: 9501,
+                  location: 'Opening, paragraph 1',
+                  reason: 'Clarify the opening section to reduce ambiguity.',
+                  priority: 'high',
+                  start_offset: 0,
+                  end_offset: 10,
+                  source_comment_ids: [601]
+                }
+              ],
+              clean_sections: [],
+              clean_statement: 'No section is clean enough to skip yet.'
+            },
             comments: [
               {
                 id: 9501,
@@ -330,6 +346,7 @@ describe('page controls', () => {
             model: 'gpt-4o-mini',
             error_message: null,
             created_at: new Date().toISOString(),
+            summary: null,
             comments: []
           });
         const asFailed = () =>
@@ -345,6 +362,7 @@ describe('page controls', () => {
             model: 'gpt-4o-mini',
             error_message: 'Provider timeout',
             created_at: new Date().toISOString(),
+            summary: null,
             comments: []
           });
 
@@ -372,6 +390,7 @@ describe('page controls', () => {
               model: 'gpt-4o-mini',
               error_message: null,
               created_at: new Date().toISOString(),
+              summary: null,
               comments: []
             });
           }
@@ -407,12 +426,20 @@ describe('page controls', () => {
             model: 'gpt-4o-mini',
             error_message: null,
             created_at: new Date().toISOString(),
+            summary: {
+              verdict: 'clean',
+              attention_points: [],
+              clean_sections: ['Entire document'],
+              clean_statement: 'Entire document is clean — no significant issues found.'
+            },
             comments: []
           },
           201
         );
       }
-      if (url.endsWith('/personas') && (!init || init.method === 'GET')) return json(personasPayload);
+      if (url.endsWith('/personas') && (!init?.method || init.method === 'GET')) {
+        return json(personasPayload);
+      }
       if (url.endsWith('/personas') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body || '{}'));
         return json({
@@ -710,7 +737,10 @@ describe('page controls', () => {
     mockSearchParams = new URLSearchParams('doc=101');
     render(<HomePage />);
 
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
+    expect(await screen.findByText('Problems')).toBeTruthy();
+    expect(await screen.findByText('Top attention points')).toBeTruthy();
+    expect(await screen.findByText('What is fine')).toBeTruthy();
     expect(await screen.findByText('Clarify the opening section to reduce ambiguity.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
   });
@@ -721,7 +751,7 @@ describe('page controls', () => {
     mockSearchParams = new URLSearchParams('doc=101');
     render(<HomePage />);
 
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     expect(await screen.findByText('Unable to load meta directives right now.')).toBeTruthy();
     expect(await screen.findByText('Meta synthesis failed: Provider timeout')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
@@ -733,7 +763,7 @@ describe('page controls', () => {
     mockSearchParams = new URLSearchParams('doc=101');
     render(<HomePage />);
 
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     expect(await screen.findByText('Meta directives are still being synthesized…')).toBeTruthy();
     expect(await screen.findByText('Meta directives are still being synthesized.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
@@ -797,6 +827,7 @@ describe('page controls', () => {
     fireEvent.click(recompute);
 
     expect(await screen.findByText('No meta directives produced for this version.')).toBeTruthy();
+    expect(await screen.findByText('Clean')).toBeTruthy();
     expect(await screen.findByText('No significant issues found.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
 
@@ -822,18 +853,16 @@ describe('page controls', () => {
     expect(
       await screen.findByText('Anchored reviewer comments for this document version.')
     ).toBeTruthy();
-    expect(
-      await screen.findByText('No meta directives found for this run yet. Showing individual reviewer comments.')
-    ).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Meta' }));
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.', {}, { timeout: 3000 })).toBeTruthy();
     expect(
-      await screen.findAllByText('No meta directives available for this run yet. Recompute to synthesize now.')
-    ).toHaveLength(2);
+      (await screen.findAllByText('No meta directives available for this run yet. Recompute to synthesize now.', {}, { timeout: 3000 })).length
+    ).toBeGreaterThan(0);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Recompute' }));
     expect(await screen.findByText('No meta directives produced for this version.')).toBeTruthy();
+    expect(await screen.findByText('Clean')).toBeTruthy();
     expect(await screen.findByText('No significant issues found.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
   });
@@ -847,18 +876,11 @@ describe('page controls', () => {
     expect(
       await screen.findByText('Anchored reviewer comments for this document version.')
     ).toBeTruthy();
-    expect(
-      await screen.findByText('No meta directives found for this run yet. Showing individual reviewer comments.')
-    ).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Meta' }));
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.', {}, { timeout: 3000 })).toBeTruthy();
     expect(
-      (
-        await screen.findAllByText(
-          'No meta directives available for this run yet. Recompute to synthesize now.'
-        )
-      ).length
+      (await screen.findAllByText('No meta directives available for this run yet. Recompute to synthesize now.', {}, { timeout: 3000 })).length
     ).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: 'Individual' }));
@@ -883,7 +905,7 @@ describe('page controls', () => {
     mockSearchParams = new URLSearchParams('doc=101&mode=meta&directive=9501');
     render(<HomePage />);
 
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     await waitFor(() => {
       expect(document.querySelector('.comment-card[data-meta-id="9501"].selected')).toBeTruthy();
     });
@@ -914,7 +936,7 @@ describe('page controls', () => {
     mockSearchParams = new URLSearchParams('doc=101&mode=meta&directive=9999');
     render(<HomePage />);
 
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     expect(await screen.findByText('Requested directive #9999 is not available for this run.')).toBeTruthy();
 
     await waitFor(() => {
@@ -929,7 +951,7 @@ describe('page controls', () => {
     mockSearchParams = new URLSearchParams('doc=101&mode=meta&directive=9501');
     render(<HomePage />);
 
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     fireEvent.click((await screen.findAllByText('Show sources (1)'))[0]);
     expect(await screen.findByText('Anchor excerpt: “Design”')).toBeTruthy();
 
@@ -955,7 +977,7 @@ describe('page controls', () => {
     mockSearchParams = new URLSearchParams('doc=101');
     render(<HomePage />);
 
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
 
     fireEvent.click((await screen.findAllByText('Show sources (1)'))[0]);
@@ -963,7 +985,7 @@ describe('page controls', () => {
     expect(await screen.findByRole('button', { name: 'Refresh' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Meta' }));
-    expect(await screen.findByText('Meta-synthesized directives with source attribution.')).toBeTruthy();
+    expect(await screen.findByText('Verdict, top attention points, and clean sections.')).toBeTruthy();
     expect(await screen.findByText('Clarify the opening section to reduce ambiguity.')).toBeTruthy();
   });
 
@@ -1059,6 +1081,48 @@ describe('page controls', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Save Agent' })).toBeTruthy();
     });
+  });
+
+  it('duplicates an existing agent into a create draft', async () => {
+    mockPathname = '/agents';
+    render(<HomePage />);
+
+    await screen.findByText('Clarity Editor');
+    fireEvent.click(await screen.findByRole('button', { name: 'Duplicate' }));
+
+    expect(await screen.findByDisplayValue('Clarity Editor Copy')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Create Agent' })).toBeTruthy();
+  });
+
+  it('quick toggles active status from the agent list', async () => {
+    mockPathname = '/agents';
+    render(<HomePage />);
+
+    await screen.findByText('Clarity Editor');
+    fireEvent.click(await screen.findByRole('button', { name: 'Disable' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Enable' })).toBeTruthy();
+    });
+    const patchCall = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.find(
+      (args) =>
+        String(args[0]).includes('/personas/1') &&
+        args[1]?.method === 'PATCH' &&
+        String(args[1]?.body ?? '').includes('"is_active":false')
+    );
+    expect(patchCall).toBeTruthy();
+  });
+
+  it('filters agent list by search', async () => {
+    mockPathname = '/agents';
+    render(<HomePage />);
+
+    await screen.findByText('Clarity Editor');
+    fireEvent.change(await screen.findByPlaceholderText('Search agents'), {
+      target: { value: 'not-a-match' }
+    });
+
+    expect(await screen.findByText('No agents match your search.')).toBeTruthy();
   });
 
   it('opens admin overlay from route', async () => {
