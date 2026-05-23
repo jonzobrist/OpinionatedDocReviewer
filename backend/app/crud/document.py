@@ -1,8 +1,13 @@
+import logging
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db import models
+from app.reviews.git_repo import remove_repo
 from app.schemas.document import DocumentCreate, DocumentUpdate
+
+logger = logging.getLogger(__name__)
 
 
 def create_document(db: Session, tenant_id: str, data: DocumentCreate) -> models.Document:
@@ -10,6 +15,21 @@ def create_document(db: Session, tenant_id: str, data: DocumentCreate) -> models
     db.add(doc)
     db.commit()
     db.refresh(doc)
+    if settings.DOC_REPO_ENABLED:
+        try:
+            removed = remove_repo(tenant_id, doc.id)
+            if removed:
+                logger.warning(
+                    "stale_doc_repo_cleaned tenant_id=%s document_id=%s",
+                    tenant_id,
+                    doc.id,
+                )
+        except Exception:
+            logger.exception(
+                "stale_doc_repo_cleanup_failed tenant_id=%s document_id=%s",
+                tenant_id,
+                doc.id,
+            )
     return doc
 
 
@@ -53,6 +73,15 @@ def delete_document(db: Session, tenant_id: str, document_id: int) -> bool:
         return False
     db.delete(doc)
     db.commit()
+    if settings.DOC_REPO_ENABLED:
+        try:
+            remove_repo(tenant_id, document_id)
+        except Exception:
+            logger.exception(
+                "doc_repo_cleanup_failed tenant_id=%s document_id=%s",
+                tenant_id,
+                document_id,
+            )
     return True
 
 

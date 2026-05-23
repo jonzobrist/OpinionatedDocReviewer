@@ -118,7 +118,8 @@ class Settings(BaseSettings):
     OIDC_NAME_CLAIM: str = "name"
     OIDC_ROLES_CLAIM: str = "roles"
     OIDC_ADMIN_ROLE: str = "admin"
-    OIDC_ALLOW_LOCAL_HEADER_FALLBACK: bool = True
+    OIDC_ALLOW_LOCAL_HEADER_FALLBACK: bool = False
+    MAX_REQUEST_BODY_BYTES: int = 5 * 1024 * 1024
     LOCAL_AUTH_JWT_SECRET: str = "change-me-local-auth-secret"
     LOCAL_AUTH_JWT_ALGORITHM: str = "HS256"
     LOCAL_AUTH_ACCESS_TOKEN_TTL_MINUTES: int = 720
@@ -131,6 +132,20 @@ class Settings(BaseSettings):
     TRUST_PROXY_HEADERS: bool = False
     PROXY_TRUSTED_IPS: str = "127.0.0.1"
     META_AUTO_SYNTHESIS_ENABLED: bool = True
+    # Enables the LLM-synthesized verdict pass that produces a
+    # bottom-line summary and top-blockers list alongside the rule-based
+    # verdict threshold. When False (or the provider fails), the summary
+    # still renders using the deterministic rule-based verdict so the UI
+    # stays usable in air-gapped / degraded scenarios.
+    META_VERDICT_USE_LLM: bool = True
+    # When True, meta-directive dedupe uses cosine similarity on
+    # embeddings of the directive content (plus the existing location /
+    # category boosts) instead of token-Jaccard. Catches semantic
+    # duplicates that share meaning but not words. Falls back to the
+    # Jaccard path on embedding-provider failure so dedupe always runs.
+    META_DEDUPE_USE_EMBEDDINGS: bool = True
+    META_DEDUPE_EMBEDDING_THRESHOLD: float = 0.85
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     META_AGENT_NAME: str = "Meta Reviewer"
     META_AGENT_DESCRIPTION: str = "Synthesizes reviewer comments into ranked directives."
     META_AGENT_SYSTEM_PROMPT: str = (

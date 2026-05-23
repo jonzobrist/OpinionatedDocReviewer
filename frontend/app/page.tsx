@@ -16,16 +16,7 @@ import JSZip from 'jszip';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import {
-  apiFetch,
-  DEFAULT_TENANT,
-  getAccessToken,
-  getApiBase,
-  getTenantId,
-  setAccessToken,
-  setApiBase,
-  setTenantId
-} from '../src/lib/api';
+import { apiFetch } from '../src/lib/api';
 import { deriveTitle } from '../src/lib/deriveTitle';
 import {
   AgentTheme,
@@ -39,9 +30,6 @@ import {
   listVisibleAgents
 } from '../src/lib/agentList';
 import {
-  AdminOverview,
-  AdminUserRead,
-  DocumentPermissionRead,
   CommentRead,
   DocumentCommitRead,
   DocumentLibraryEntry,
@@ -51,10 +39,13 @@ import {
   ReviewJobRead,
   MetaCommentSourceRead,
   MetaReviewRunRead,
-  WorkerMonitorRead,
-  SystemConfigRead,
   SystemStatus
 } from '../src/lib/types';
+import { MermaidDiagram } from './components/MermaidDiagram';
+import { AdminPanel } from './components/AdminPanel';
+import { SystemPanel } from './components/SystemPanel';
+import { HistoryPanel } from './components/HistoryPanel';
+import { LibraryPanel } from './components/LibraryPanel';
 
 const POLL_INTERVAL_MS = 1200;
 const META_STATUS_POLL_MAX_ATTEMPTS = 8;
@@ -94,56 +85,7 @@ type AgentImportResult = {
   errors: string[];
 };
 
-function MermaidDiagram({ chart }: { chart: string }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const chartIdRef = useRef(`mermaid-${Math.random().toString(36).slice(2)}`);
-
-  useEffect(() => {
-    let cancelled = false;
-    setError(null);
-    const run = async () => {
-      const target = containerRef.current;
-      if (!target) return;
-      try {
-        const mod = await import('mermaid');
-        const mermaid = mod.default;
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: 'strict',
-          theme: 'neutral',
-          suppressErrorRendering: true
-        });
-        const result = await mermaid.render(chartIdRef.current, chart);
-        if (cancelled || !containerRef.current) return;
-        containerRef.current.innerHTML = result.svg;
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Mermaid rendering failed');
-      }
-    };
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [chart]);
-
-  if (error) {
-    return (
-      <div className="mermaid-fallback">
-        Mermaid render error: {error}
-        <pre>{chart}</pre>
-      </div>
-    );
-  }
-
-  return <div className="mermaid-diagram" ref={containerRef} />;
-}
-
 function HomePageContent() {
-  const [apiBase, setApiBaseState] = useState('');
-  const [tenantId, setTenantIdState] = useState('');
-  const [accessToken, setAccessTokenState] = useState('');
 
   const [documents, setDocuments] = useState<DocumentRead[]>([]);
   const [libraryEntries, setLibraryEntries] = useState<DocumentLibraryEntry[]>([]);
@@ -152,27 +94,7 @@ function HomePageContent() {
   const [reviewJobs, setReviewJobs] = useState<ReviewJobRead[]>([]);
   const [personas, setPersonas] = useState<PersonaRead[]>([]);
   const [history, setHistory] = useState<DocumentCommitRead[]>([]);
-  const [historyJobs, setHistoryJobs] = useState<ReviewJobRead[]>([]);
-  const [historyDocumentId, setHistoryDocumentId] = useState<number | null>(null);
-  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
-  const [systemConfig, setSystemConfig] = useState<SystemConfigRead | null>(null);
-  const [workerMonitor, setWorkerMonitor] = useState<WorkerMonitorRead | null>(null);
-  const [isWorkerMonitorLoading, setIsWorkerMonitorLoading] = useState(false);
-  const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null);
-  const [adminUsers, setAdminUsers] = useState<AdminUserRead[]>([]);
-  const [adminPermissions, setAdminPermissions] = useState<DocumentPermissionRead[]>([]);
-  const [selectedPermissionDocumentId, setSelectedPermissionDocumentId] = useState<number | null>(null);
-  const [newAdminUser, setNewAdminUser] = useState({
-    name: '',
-    email: '',
-    role: 'default' as 'admin' | 'default'
-  });
-  const [newPermission, setNewPermission] = useState({
-    user_id: 0,
-    permission_level: 'viewer' as 'owner' | 'editor' | 'viewer'
-  });
-
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [selectedReviewJobId, setSelectedReviewJobId] = useState<number | null>(null);
@@ -199,12 +121,6 @@ function HomePageContent() {
   const [metaCategoryFilter, setMetaCategoryFilter] = useState<
     'all' | 'structure' | 'clarity' | 'technical' | 'security' | 'accessibility' | 'style'
   >('all');
-  const [libraryFilter, setLibraryFilter] = useState<
-    'all' | 'needs' | 'reviewed' | 'archived'
-  >('all');
-  const [librarySearch, setLibrarySearch] = useState('');
-  const [selectedLibraryIds, setSelectedLibraryIds] = useState<Set<number>>(new Set());
-  const [isLibraryHovering, setIsLibraryHovering] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{
     label: string;
     done: number;
@@ -246,9 +162,19 @@ function HomePageContent() {
   const hoveredMetaCommentIdRef = useRef<number | null>(null);
   const hoverAlignFrameRef = useRef<number | null>(null);
   const handledRouteIntentRef = useRef<string | null>(null);
+  // Selection-generation: bumped on every document switch. Async fetches
+  // capture the value at call time and drop their response if the user
+  // has switched to a different document before the response returns.
+  // This prevents stale polling/refresh responses from overwriting fresh
+  // state when the user rapidly switches between documents.
+  const selectedVersionIdRef = useRef<number | null>(null);
+  const selectedReviewJobIdRef = useRef<number | null>(null);
+  const selectionGenerationRef = useRef(0);
+  // Dedupe key for in-flight meta auto-loads so polling-driven status
+  // changes do not fire concurrent duplicate requests.
+  const metaLoadInFlightRef = useRef<string | null>(null);
   const isApplyingRouteQueryStateRef = useRef(false);
   const importAgentsInputRef = useRef<HTMLInputElement | null>(null);
-  const importReviewBundleInputRef = useRef<HTMLInputElement | null>(null);
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -342,26 +268,9 @@ function HomePageContent() {
   }, [comments]);
 
   useEffect(() => {
-    setApiBaseState(getApiBase());
-    setTenantIdState(getTenantId());
-    setAccessTokenState(getAccessToken());
     setAgentThemes(loadAgentThemes());
-  }, []);
-
-  useEffect(() => {
     void refreshAll();
-  }, [tenantId]);
-
-  useEffect(() => {
-    if (!showHistory) return;
-    if (historyDocumentId === null) {
-      const preferredId = selectedDocumentId ?? libraryEntries[0]?.id ?? null;
-      setHistoryDocumentId(preferredId);
-      void refreshHistoryPanel(preferredId);
-      return;
-    }
-    void refreshHistoryPanel(historyDocumentId);
-  }, [showHistory, historyDocumentId, selectedDocumentId, libraryEntries]);
+  }, []);
 
   useEffect(() => {
     if (!showAgents) return;
@@ -386,20 +295,26 @@ function HomePageContent() {
   }, [agentImportConflictPolicy]);
 
   useEffect(() => {
-    if (!selectedVersionId) return;
-    const interval = setInterval(() => {
-      void loadComments(selectedVersionId, true, selectedReviewJobId);
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [selectedVersionId, selectedReviewJobId]);
+    selectedVersionIdRef.current = selectedVersionId;
+    selectionGenerationRef.current += 1;
+  }, [selectedVersionId]);
 
   useEffect(() => {
-    if (!selectedVersionId) return;
+    selectedReviewJobIdRef.current = selectedReviewJobId;
+  }, [selectedReviewJobId]);
+
+  useEffect(() => {
+    // Single run-once poller reads from refs so fast doc-switches do not
+    // leave ghost intervals bound to stale (versionId, reviewJobId) values.
     const interval = setInterval(() => {
-      void loadReviewJobsSnapshot(selectedVersionId);
+      const vid = selectedVersionIdRef.current;
+      if (!vid) return;
+      const jid = selectedReviewJobIdRef.current;
+      void loadComments(vid, true, jid);
+      void loadReviewJobsSnapshot(vid);
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [selectedVersionId, selectedReviewJobId]);
+  }, []);
 
   useEffect(() => {
     setMetaReviewRun(null);
@@ -419,9 +334,19 @@ function HomePageContent() {
   useEffect(() => {
     if (commentViewMode !== 'meta') return;
     if (!selectedVersionId) return;
+    // Key includes everything that meaningfully changes a meta-load outcome.
+    // Polling can rebuild reviewJobs on every tick, but if (version, job,
+    // status) is unchanged we must not fire a duplicate request in flight.
+    const key = `${selectedVersionId}:${selectedReviewJobId ?? 'none'}:${selectedReviewJob?.status ?? 'na'}:${commentModeSelectionSource}`;
+    if (metaLoadInFlightRef.current === key) return;
+    metaLoadInFlightRef.current = key;
     void loadOrCreateMetaReview(selectedVersionId, selectedReviewJobId, false, {
       fallbackToIndividualOnMissing: commentModeSelectionSource === 'auto',
       reviewJobStatus: selectedReviewJob?.status ?? null
+    }).finally(() => {
+      if (metaLoadInFlightRef.current === key) {
+        metaLoadInFlightRef.current = null;
+      }
     });
   }, [
     commentViewMode,
@@ -602,27 +527,6 @@ function HomePageContent() {
   }, []);
 
   useEffect(() => {
-    if (showSettings) {
-      void loadSystemConfig();
-      void loadWorkerMonitor();
-    }
-  }, [showSettings]);
-
-  useEffect(() => {
-    if (!showSettings) return;
-    const interval = setInterval(() => {
-      void loadWorkerMonitor();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [showSettings]);
-
-  useEffect(() => {
-    if (showAdmin) {
-      void refreshAdminData();
-    }
-  }, [showAdmin]);
-
-  useEffect(() => {
     if (!statusMessage) return;
     const timer = window.setTimeout(() => {
       setStatusMessage((current) => (current === statusMessage ? null : current));
@@ -685,67 +589,6 @@ function HomePageContent() {
     }
   }
 
-  async function loadSystemConfig() {
-    try {
-      const cfg = await apiFetch<SystemConfigRead>('/settings');
-      setSystemConfig(cfg);
-    } catch (error) {
-      setErrorMessage(normalizeError(error));
-    }
-  }
-
-  async function loadWorkerMonitor() {
-    setIsWorkerMonitorLoading(true);
-    try {
-      const monitor = await apiFetch<WorkerMonitorRead>('/admin/worker-monitor');
-      setWorkerMonitor(monitor);
-    } catch (error) {
-      setErrorMessage(normalizeError(error));
-      setWorkerMonitor(null);
-    } finally {
-      setIsWorkerMonitorLoading(false);
-    }
-  }
-
-  async function loadAdminOverview() {
-    try {
-      const data = await apiFetch<AdminOverview>('/admin/overview');
-      setAdminOverview(data);
-    } catch (error) {
-      setErrorMessage(normalizeError(error));
-    }
-  }
-
-  async function loadAdminUsers() {
-    try {
-      const users = await apiFetch<AdminUserRead[]>('/admin/users');
-      const safeUsers = Array.isArray(users) ? users : [];
-      setAdminUsers(safeUsers);
-      if (safeUsers.length > 0 && newPermission.user_id === 0) {
-        setNewPermission((prev) => ({ ...prev, user_id: safeUsers[0].id }));
-      }
-    } catch (error) {
-      setErrorMessage(normalizeError(error));
-    }
-  }
-
-  async function loadAdminPermissions() {
-    try {
-      const permissions = await apiFetch<DocumentPermissionRead[]>('/admin/permissions');
-      setAdminPermissions(Array.isArray(permissions) ? permissions : []);
-    } catch (error) {
-      setErrorMessage(normalizeError(error));
-    }
-  }
-
-  async function refreshAdminData() {
-    await Promise.all([
-      loadAdminOverview(),
-      loadAdminUsers(),
-      loadAdminPermissions()
-    ]);
-  }
-
   async function loadVersions(documentId: number): Promise<DocumentVersionRead[]> {
     setErrorMessage(null);
     try {
@@ -777,32 +620,6 @@ function HomePageContent() {
     }
   }
 
-  async function loadHistoryJobs() {
-    try {
-      const jobs = await apiFetch<ReviewJobRead[]>('/review-jobs');
-      const safeJobs = Array.isArray(jobs) ? jobs : [];
-      safeJobs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      setHistoryJobs(safeJobs);
-    } catch (error) {
-      setErrorMessage(normalizeError(error));
-      setHistoryJobs([]);
-    }
-  }
-
-  async function refreshHistoryPanel(documentId: number | null) {
-    setIsHistoryLoading(true);
-    try {
-      await loadHistoryJobs();
-      if (documentId) {
-        await loadHistory(documentId);
-      } else {
-        setHistory([]);
-      }
-    } finally {
-      setIsHistoryLoading(false);
-    }
-  }
-
   async function loadReviewJobsForVersion(versionId: number) {
     try {
       const jobs = await apiFetch<ReviewJobRead[]>(`/review-jobs?document_version_id=${versionId}`);
@@ -826,9 +643,14 @@ function HomePageContent() {
     jobs: ReviewJobRead[];
     selectedId: number | null;
   }> {
-    const currentSelected = selectedReviewJobId;
+    const generationAtCall = selectionGenerationRef.current;
+    const currentSelected = selectedReviewJobIdRef.current;
     try {
       const jobs = await apiFetch<ReviewJobRead[]>(`/review-jobs?document_version_id=${versionId}`);
+      // Drop the response if the user has switched documents in the meantime.
+      if (selectionGenerationRef.current !== generationAtCall) {
+        return { jobs: [], selectedId: currentSelected };
+      }
       setReviewJobs(jobs);
       if (jobs.length === 0) {
         setSelectedReviewJobId(null);
@@ -901,9 +723,14 @@ function HomePageContent() {
     markRecent: boolean,
     reviewJobId?: number | null
   ): Promise<CommentRead[]> {
+    const generationAtCall = selectionGenerationRef.current;
     try {
       const query = reviewJobId ? `&review_job_id=${reviewJobId}` : '';
       const data = await apiFetch<CommentRead[]>(`/comments?document_version_id=${versionId}${query}`);
+      // Drop stale response if the user has switched documents.
+      if (selectionGenerationRef.current !== generationAtCall) {
+        return commentsRef.current;
+      }
       const signature = buildCommentSignature(data);
       if (markRecent) {
         const now = Date.now();
@@ -1125,8 +952,7 @@ function HomePageContent() {
     }
   }
 
-  async function handleBulkArchive(archived: boolean) {
-    const ids = Array.from(selectedLibraryIds);
+  async function handleBulkArchive(archived: boolean, ids: number[]) {
     if (ids.length === 0) {
       setStatusMessage('Select one or more documents first.');
       return;
@@ -1146,7 +972,6 @@ function HomePageContent() {
           total: ids.length
         });
       }
-      setSelectedLibraryIds(new Set());
       setStatusMessage(archived ? 'Selected documents archived.' : 'Selected documents restored.');
       await refreshAll();
     } catch (error) {
@@ -1156,8 +981,7 @@ function HomePageContent() {
     }
   }
 
-  async function handleBulkDelete() {
-    const ids = Array.from(selectedLibraryIds);
+  async function handleBulkDelete(ids: number[]) {
     if (ids.length === 0) {
       setStatusMessage('Select one or more documents first.');
       return;
@@ -1181,7 +1005,6 @@ function HomePageContent() {
         setVersions([]);
         setComments([]);
       }
-      setSelectedLibraryIds(new Set());
       setStatusMessage('Selected documents deleted.');
       await refreshAll();
     } catch (error) {
@@ -1191,10 +1014,7 @@ function HomePageContent() {
     }
   }
 
-  async function handleBulkRerun() {
-    const targets = filteredLibraryWithSearch.filter(
-      (entry) => selectedLibraryIds.has(entry.id) && Boolean(entry.latest_version_id)
-    );
+  async function handleBulkRerun(targets: DocumentLibraryEntry[]) {
     if (targets.length === 0) {
       setStatusMessage('Select documents with at least one version to re-run review.');
       return;
@@ -1215,7 +1035,6 @@ function HomePageContent() {
         });
         setBulkProgress({ label: 'Queueing re-review', done: idx + 1, total: targets.length });
       }
-      setSelectedLibraryIds(new Set());
       setStatusMessage(`Queued re-review for ${targets.length} document(s).`);
       await refreshAll();
     } catch (error) {
@@ -1306,16 +1125,6 @@ function HomePageContent() {
     setStatusMessage('Loaded saved review for selected document.');
   }
 
-  function handleTenantSave() {
-    const resolvedApiBase =
-      apiBase.trim() || (typeof window !== 'undefined' ? `${window.location.origin}/api` : getApiBase());
-    setTenantId(tenantId || DEFAULT_TENANT);
-    setApiBase(resolvedApiBase);
-    setAccessToken(accessToken);
-    setStatusMessage('Connection settings saved.');
-    void refreshAll();
-  }
-
   async function handleExportAgents() {
     try {
       const bundle = await apiFetch<{
@@ -1400,208 +1209,6 @@ function HomePageContent() {
     }
   }
 
-  async function handleCreateAdminUser() {
-    if (!newAdminUser.name.trim() || !newAdminUser.email.trim()) {
-      setErrorMessage('User name and email are required.');
-      return;
-    }
-    try {
-      await apiFetch<AdminUserRead>('/admin/users', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: newAdminUser.name.trim(),
-          email: newAdminUser.email.trim(),
-          role: newAdminUser.role,
-          is_active: true
-        })
-      });
-      setNewAdminUser({ name: '', email: '', role: 'default' });
-      setStatusMessage('User created.');
-      await refreshAdminData();
-    } catch (error) {
-      setErrorMessage(normalizeError(error));
-    }
-  }
-
-  async function handleUpdateAdminUser(
-    userId: number,
-    patch: Partial<{ role: 'admin' | 'default'; is_active: boolean }>
-  ) {
-    try {
-      await apiFetch<AdminUserRead>(`/admin/users/${userId}`, {
-        method: 'PATCH',
-        body: JSON.stringify(patch)
-      });
-      await refreshAdminData();
-    } catch (error) {
-      setErrorMessage(normalizeError(error));
-    }
-  }
-
-  async function handleDeleteAdminUser(userId: number) {
-    const confirmed = window.confirm('Delete this user and all document permissions?');
-    if (!confirmed) return;
-    try {
-      await apiFetch<null>(`/admin/users/${userId}`, { method: 'DELETE' });
-      setStatusMessage('User deleted.');
-      await refreshAdminData();
-    } catch (error) {
-      setErrorMessage(normalizeError(error));
-    }
-  }
-
-  async function handleCreatePermission() {
-    if (!selectedPermissionDocumentId || newPermission.user_id <= 0) {
-      setErrorMessage('Select a document and user before adding permission.');
-      return;
-    }
-    try {
-      await apiFetch<DocumentPermissionRead>('/admin/permissions', {
-        method: 'POST',
-        body: JSON.stringify({
-          document_id: selectedPermissionDocumentId,
-          user_id: newPermission.user_id,
-          permission_level: newPermission.permission_level
-        })
-      });
-      setStatusMessage('Permission upserted.');
-      await refreshAdminData();
-    } catch (error) {
-      setErrorMessage(normalizeError(error));
-    }
-  }
-
-  async function handleUpdatePermission(
-    permissionId: number,
-    permission_level: 'owner' | 'editor' | 'viewer'
-  ) {
-    try {
-      await apiFetch<DocumentPermissionRead>(`/admin/permissions/${permissionId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ permission_level })
-      });
-      await refreshAdminData();
-    } catch (error) {
-      setErrorMessage(normalizeError(error));
-    }
-  }
-
-  async function handleDeletePermission(permissionId: number) {
-    try {
-      await apiFetch<null>(`/admin/permissions/${permissionId}`, { method: 'DELETE' });
-      await refreshAdminData();
-    } catch (error) {
-      setErrorMessage(normalizeError(error));
-    }
-  }
-
-  async function handleSystemConfigSave() {
-    if (!systemConfig) return;
-    try {
-      const payload = {
-        llm_provider: systemConfig.llm_provider,
-        openai_model: systemConfig.openai_model,
-        openai_max_tokens: systemConfig.openai_max_tokens,
-        openai_temperature: systemConfig.openai_temperature,
-        openai_timeout_seconds: systemConfig.openai_timeout_seconds,
-        bedrock_model_id: systemConfig.bedrock_model_id,
-        bedrock_region: systemConfig.bedrock_region,
-        review_inline: systemConfig.review_inline,
-        redis_url: systemConfig.redis_url,
-        review_queue_name: systemConfig.review_queue_name,
-        doc_repo_enabled: systemConfig.doc_repo_enabled,
-        doc_repo_root: systemConfig.doc_repo_root,
-        cors_allow_origins: systemConfig.cors_allow_origins,
-        cors_allow_origin_regex: systemConfig.cors_allow_origin_regex,
-        cors_allow_credentials: systemConfig.cors_allow_credentials,
-        cors_allow_methods: systemConfig.cors_allow_methods,
-        cors_allow_headers: systemConfig.cors_allow_headers,
-        cors_max_age: systemConfig.cors_max_age,
-        meta_agent_name: systemConfig.meta_agent_name,
-        meta_agent_description: systemConfig.meta_agent_description,
-        meta_agent_system_prompt: systemConfig.meta_agent_system_prompt,
-        meta_agent_focus_areas: systemConfig.meta_agent_focus_areas,
-        meta_agent_tone: systemConfig.meta_agent_tone,
-        meta_agent_reference_notes: systemConfig.meta_agent_reference_notes,
-        meta_agent_output_format: systemConfig.meta_agent_output_format,
-        meta_agent_output_max_bullets: systemConfig.meta_agent_output_max_bullets,
-        meta_agent_output_require_quote_excerpt:
-          systemConfig.meta_agent_output_require_quote_excerpt,
-        meta_agent_output_require_actionable: systemConfig.meta_agent_output_require_actionable,
-        meta_agent_output_include_severity: systemConfig.meta_agent_output_include_severity,
-        meta_agent_examples: systemConfig.meta_agent_examples,
-        meta_max_directives_per_group: systemConfig.meta_max_directives_per_group,
-        meta_global_dedupe_threshold: systemConfig.meta_global_dedupe_threshold
-      };
-      const next = await apiFetch<SystemConfigRead>('/settings', {
-        method: 'PUT',
-        body: JSON.stringify(payload)
-      });
-      setSystemConfig(next);
-      setStatusMessage('Backend review settings saved.');
-      void loadSystemStatus();
-    } catch (error) {
-      setErrorMessage(normalizeError(error));
-    }
-  }
-
-  async function handleSaveSecret(
-    field:
-      | 'openai_api_key'
-      | 'bedrock_aws_access_key_id'
-      | 'bedrock_aws_secret_access_key'
-      | 'bedrock_aws_session_token',
-    value: string
-  ) {
-    if (!systemConfig) return;
-    try {
-      const payload = {
-        llm_provider: systemConfig.llm_provider,
-        openai_model: systemConfig.openai_model,
-        openai_max_tokens: systemConfig.openai_max_tokens,
-        openai_temperature: systemConfig.openai_temperature,
-        openai_timeout_seconds: systemConfig.openai_timeout_seconds,
-        bedrock_model_id: systemConfig.bedrock_model_id,
-        bedrock_region: systemConfig.bedrock_region,
-        review_inline: systemConfig.review_inline,
-        redis_url: systemConfig.redis_url,
-        review_queue_name: systemConfig.review_queue_name,
-        doc_repo_enabled: systemConfig.doc_repo_enabled,
-        doc_repo_root: systemConfig.doc_repo_root,
-        cors_allow_origins: systemConfig.cors_allow_origins,
-        cors_allow_origin_regex: systemConfig.cors_allow_origin_regex,
-        cors_allow_credentials: systemConfig.cors_allow_credentials,
-        cors_allow_methods: systemConfig.cors_allow_methods,
-        cors_allow_headers: systemConfig.cors_allow_headers,
-        cors_max_age: systemConfig.cors_max_age,
-        meta_agent_name: systemConfig.meta_agent_name,
-        meta_agent_description: systemConfig.meta_agent_description,
-        meta_agent_system_prompt: systemConfig.meta_agent_system_prompt,
-        meta_agent_focus_areas: systemConfig.meta_agent_focus_areas,
-        meta_agent_tone: systemConfig.meta_agent_tone,
-        meta_agent_reference_notes: systemConfig.meta_agent_reference_notes,
-        meta_agent_output_format: systemConfig.meta_agent_output_format,
-        meta_agent_output_max_bullets: systemConfig.meta_agent_output_max_bullets,
-        meta_agent_output_require_quote_excerpt:
-          systemConfig.meta_agent_output_require_quote_excerpt,
-        meta_agent_output_require_actionable: systemConfig.meta_agent_output_require_actionable,
-        meta_agent_output_include_severity: systemConfig.meta_agent_output_include_severity,
-        meta_agent_examples: systemConfig.meta_agent_examples,
-        meta_max_directives_per_group: systemConfig.meta_max_directives_per_group,
-        meta_global_dedupe_threshold: systemConfig.meta_global_dedupe_threshold,
-        [field]: value
-      };
-      const next = await apiFetch<SystemConfigRead>('/settings', {
-        method: 'PUT',
-        body: JSON.stringify(payload)
-      });
-      setSystemConfig(next);
-      setStatusMessage('Secret updated.');
-      void loadSystemStatus();
-    } catch (error) {
-      setErrorMessage(normalizeError(error));
-    }
-  }
 
   function setPersonaForEditing(persona: PersonaRead) {
     setIsCreatingAgent(false);
@@ -1851,28 +1458,6 @@ function HomePageContent() {
     return map;
   }, [personas]);
 
-  const filteredLibrary = useMemo(() => {
-    if (libraryFilter === 'archived') {
-      return libraryEntries.filter((entry) => entry.is_archived);
-    }
-    const active = libraryEntries.filter((entry) => !entry.is_archived);
-    if (libraryFilter === 'all') return active;
-    if (libraryFilter === 'needs') {
-      return active.filter((entry) => entry.needs_review);
-    }
-    return active.filter((entry) => !entry.needs_review);
-  }, [libraryEntries, libraryFilter]);
-
-  const filteredLibraryWithSearch = useMemo(() => {
-    if (!librarySearch.trim()) return filteredLibrary;
-    const query = librarySearch.trim().toLowerCase();
-    return filteredLibrary.filter((entry) => entry.title.toLowerCase().includes(query));
-  }, [filteredLibrary, librarySearch]);
-
-  const visibleAdminPermissions = useMemo(() => {
-    if (!selectedPermissionDocumentId) return adminPermissions;
-    return adminPermissions.filter((perm) => perm.document_id === selectedPermissionDocumentId);
-  }, [adminPermissions, selectedPermissionDocumentId]);
 
   const filteredMetaComments = useMemo(() => {
     const comments = metaReviewRun?.comments ?? [];
@@ -1898,6 +1483,29 @@ function HomePageContent() {
       });
   }, [metaReviewRun, metaCategoryFilter]);
   const metaSummary = metaReviewRun?.summary ?? null;
+  const [showAllDirectives, setShowAllDirectives] = useState(false);
+  // How many directive cards to render by default. Matches the cap on
+  // attention_points in the verdict summary so the two surfaces stay
+  // consistent: the top-N the system considers worth promoting are both
+  // reflected in the compact summary and the detailed cards below it.
+  const META_DIRECTIVE_DEFAULT_LIMIT = 5;
+  // Auto-expand the full directive list whenever the user has focused a
+  // specific directive (click, URL drill-down, keyboard) past the
+  // default window — the card needs to be in the DOM for
+  // scroll-into-view and the selected highlighting to have an effect.
+  const focusedIndex = focusedMetaCommentId
+    ? filteredMetaComments.findIndex((item) => item.id === focusedMetaCommentId)
+    : -1;
+  const hoveredIndex = hoveredMetaCommentId
+    ? filteredMetaComments.findIndex((item) => item.id === hoveredMetaCommentId)
+    : -1;
+  const focusRequiresExpansion =
+    focusedIndex >= META_DIRECTIVE_DEFAULT_LIMIT || hoveredIndex >= META_DIRECTIVE_DEFAULT_LIMIT;
+  const mustShowAllDirectives = showAllDirectives || focusRequiresExpansion;
+  const visibleMetaDirectives = mustShowAllDirectives
+    ? filteredMetaComments
+    : filteredMetaComments.slice(0, META_DIRECTIVE_DEFAULT_LIMIT);
+  const hiddenDirectiveCount = filteredMetaComments.length - visibleMetaDirectives.length;
 
   const activeCommentId = focusedCommentId ?? hoveredCommentId;
   const activeMetaCommentId = commentViewMode === 'meta' ? focusedMetaCommentId ?? hoveredMetaCommentId : null;
@@ -2134,12 +1742,6 @@ function HomePageContent() {
     });
   }, [activeCommentId, docMode, highlightTick]);
 
-  const allFilteredSelected = useMemo(() => {
-    if (filteredLibraryWithSearch.length === 0) return false;
-    return filteredLibraryWithSearch.every((entry) => selectedLibraryIds.has(entry.id));
-  }, [filteredLibraryWithSearch, selectedLibraryIds]);
-
-  const showSelectionControls = isLibraryHovering || selectedLibraryIds.size > 0;
   const hoverCenterIndex = useMemo(
     () => visibleComments.findIndex((comment) => comment.id === hoveredCommentId),
     [visibleComments, hoveredCommentId]
@@ -3357,14 +2959,28 @@ function HomePageContent() {
                             : 'Review needed'}
                       </div>
                       <div className="meta-verdict-copy">
-                        {metaSummary.verdict === 'clean'
-                          ? 'No significant issues found.'
-                          : metaSummary.verdict === 'problems'
-                            ? 'Do not approve, send, or ship without fixing these.'
-                            : 'A few things are worth your attention.'}
+                        {metaSummary.bottom_line && metaSummary.bottom_line.trim().length > 0
+                          ? metaSummary.bottom_line
+                          : metaSummary.verdict === 'clean'
+                            ? 'No significant issues found.'
+                            : metaSummary.verdict === 'problems'
+                              ? 'Do not approve, send, or ship without fixing these.'
+                              : 'A few things are worth your attention.'}
                       </div>
                     </div>
                   </div>
+                  {metaSummary.top_blockers && metaSummary.top_blockers.length > 0 && (
+                    <div className="meta-summary-block">
+                      <div className="meta-summary-title">Top blockers</div>
+                      <ul className="meta-blocker-list">
+                        {metaSummary.top_blockers.map((blocker, index) => (
+                          <li key={`meta-blocker-${index}`} className="meta-blocker-item">
+                            {blocker}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   {metaSummary.attention_points.length > 0 && (
                     <div className="meta-summary-block">
                       <div className="meta-summary-title">Top attention points</div>
@@ -3537,7 +3153,7 @@ function HomePageContent() {
               {commentViewMode === 'meta' &&
                 !isMetaLoading &&
                 metaViewState === 'ready' &&
-                filteredMetaComments.map((metaComment, index) => {
+                visibleMetaDirectives.map((metaComment, index) => {
                   const topSource = metaComment.sources[0];
                   const pseudoColor = colorForPriority(metaComment.priority);
                   const isFloatingMetaActive =
@@ -3641,6 +3257,22 @@ function HomePageContent() {
                     </div>
                   );
                 })}
+              {commentViewMode === 'meta' &&
+                !isMetaLoading &&
+                metaViewState === 'ready' &&
+                (hiddenDirectiveCount > 0 || mustShowAllDirectives) &&
+                filteredMetaComments.length > META_DIRECTIVE_DEFAULT_LIMIT && (
+                  <button
+                    type="button"
+                    className="ghost-button meta-directive-toggle"
+                    onClick={() => setShowAllDirectives((prev) => !prev)}
+                    aria-expanded={mustShowAllDirectives}
+                  >
+                    {mustShowAllDirectives
+                      ? 'Hide secondary directives'
+                      : `Show ${hiddenDirectiveCount} more directives`}
+                  </button>
+                )}
             </div>
             {commentViewMode === 'individual' &&
               floatingComment &&
@@ -3823,375 +3455,26 @@ function HomePageContent() {
       )}
 
       {showLibrary && (
-        <div className="library-overlay">
-          <div className="library-shell">
-            <div className="library-header">
-              <div>
-                <div className="library-title">Review Ledger</div>
-                <div className="library-sub">
-                  Saved reviews stay with each version. Run a new review only when you ask.
-                </div>
-              </div>
-              <div className="library-actions">
-                <button
-                  className="ghost-button"
-                  type="button"
-                  disabled={isBundleImporting}
-                  onClick={() => importReviewBundleInputRef.current?.click()}
-                >
-                  {isBundleImporting ? 'Importing…' : 'Import Bundle'}
-                </button>
-                <input
-                  ref={importReviewBundleInputRef}
-                  type="file"
-                  accept="application/json,.json,application/zip,.zip"
-                  multiple
-                  hidden
-                  onChange={(event) => {
-                    if (event.target.files) {
-                      void handleImportReviewBundleFiles(event.target.files);
-                    }
-                    event.target.value = '';
-                  }}
-                />
-                <div className="library-filters">
-                  <button
-                    className={`filter-chip ${libraryFilter === 'all' ? 'active' : ''}`}
-                    type="button"
-                    onClick={() => setLibraryFilter('all')}
-                  >
-                    All
-                  </button>
-                  <button
-                    className={`filter-chip ${libraryFilter === 'needs' ? 'active' : ''}`}
-                    type="button"
-                    onClick={() => setLibraryFilter('needs')}
-                  >
-                    Needs Review
-                  </button>
-                  <button
-                    className={`filter-chip ${libraryFilter === 'reviewed' ? 'active' : ''}`}
-                    type="button"
-                    onClick={() => setLibraryFilter('reviewed')}
-                  >
-                    Reviewed
-                  </button>
-                  <button
-                    className={`filter-chip ${libraryFilter === 'archived' ? 'active' : ''}`}
-                    type="button"
-                    onClick={() => setLibraryFilter('archived')}
-                  >
-                    Archived
-                  </button>
-                </div>
-                <input
-                  className="library-search"
-                  placeholder="Search documents"
-                  value={librarySearch}
-                  onChange={(event) => setLibrarySearch(event.target.value)}
-                />
-              </div>
-            </div>
-
-            {(showSelectionControls || bulkProgress) && (
-              <div className="bulk-bar">
-              <label className="bulk-select-all">
-                <input
-                  type="checkbox"
-                  checked={allFilteredSelected}
-                  disabled={bulkProgress !== null || !showSelectionControls}
-                  onChange={(event) => {
-                    const next = new Set(selectedLibraryIds);
-                    if (event.target.checked) {
-                      for (const entry of filteredLibraryWithSearch) {
-                        next.add(entry.id);
-                      }
-                    } else {
-                      for (const entry of filteredLibraryWithSearch) {
-                        next.delete(entry.id);
-                      }
-                    }
-                    setSelectedLibraryIds(next);
-                  }}
-                />
-                Select all ({filteredLibraryWithSearch.length})
-              </label>
-              {bulkProgress && (
-                <div className="bulk-progress">
-                  {bulkProgress.label} {bulkProgress.done}/{bulkProgress.total}
-                </div>
-              )}
-              <div className="bulk-actions">
-                <button
-                  className="ghost-button"
-                  type="button"
-                  disabled={selectedLibraryIds.size === 0 || bulkProgress !== null}
-                  onClick={() => void handleBulkArchive(true)}
-                >
-                  Archive Selected
-                </button>
-                <button
-                  className="ghost-button"
-                  type="button"
-                  disabled={selectedLibraryIds.size === 0 || bulkProgress !== null}
-                  onClick={() => void handleBulkArchive(false)}
-                >
-                  Restore Selected
-                </button>
-                <button
-                  className="ghost-button"
-                  type="button"
-                  disabled={selectedLibraryIds.size === 0 || bulkProgress !== null}
-                  onClick={() => void handleBulkRerun()}
-                >
-                  Re-run Selected
-                </button>
-                <button
-                  className="ghost-button danger-button"
-                  type="button"
-                  disabled={selectedLibraryIds.size === 0 || bulkProgress !== null}
-                  onClick={() => void handleBulkDelete()}
-                >
-                  Delete Selected
-                </button>
-              </div>
-              </div>
-            )}
-
-            <div
-              className="library-grid"
-              onMouseEnter={() => setIsLibraryHovering(true)}
-              onMouseLeave={() => setIsLibraryHovering(false)}
-            >
-              {filteredLibraryWithSearch.length === 0 && (
-                <div className="subtle">No documents yet.</div>
-              )}
-              {filteredLibraryWithSearch.map((entry) => {
-                const statusLabel = entry.is_archived
-                  ? 'Archived'
-                  : entry.needs_review
-                    ? 'Needs Review'
-                    : 'Reviewed';
-                const versionLabel = entry.latest_version_label ?? 'No versions yet';
-                const lastEdited = entry.latest_version_created_at
-                  ? new Date(entry.latest_version_created_at).toLocaleString()
-                  : '—';
-                const lastReviewed = entry.latest_review_completed_at
-                  ? new Date(entry.latest_review_completed_at).toLocaleString()
-                  : '—';
-                return (
-                  <div key={entry.id} className={`library-card ${entry.needs_review ? 'needs' : 'ready'}`}>
-                    <div className="review-ribbon" />
-                    <div className="library-card-body">
-                      <button
-                        className="library-delete-btn"
-                        type="button"
-                        disabled={bulkProgress !== null}
-                        onClick={() => void handleDeleteDocument(entry.id, entry.title)}
-                        aria-label={`Delete ${entry.title}`}
-                      >
-                        ×
-                      </button>
-                      <label className={`library-select ${showSelectionControls ? 'visible' : ''}`}>
-                        <input
-                          type="checkbox"
-                          checked={selectedLibraryIds.has(entry.id)}
-                          disabled={bulkProgress !== null || !showSelectionControls}
-                          onChange={(event) => {
-                            const next = new Set(selectedLibraryIds);
-                            if (event.target.checked) {
-                              next.add(entry.id);
-                            } else {
-                              next.delete(entry.id);
-                            }
-                            setSelectedLibraryIds(next);
-                          }}
-                        />
-                      </label>
-                      <div className="library-card-summary">
-                        <div className="library-card-title">{entry.title}</div>
-                        <div className="library-card-meta">
-                          <span
-                            className={`status-pill ${
-                              entry.is_archived ? 'neutral' : entry.needs_review ? 'warn' : 'ok'
-                            }`}
-                          >
-                            {statusLabel}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="library-card-detail">
-                        <div className="library-card-meta">
-                          <span className="meta-pill">{versionLabel}</span>
-                        </div>
-                        <div className="library-timeline">
-                          <div>
-                            <div className="timeline-label">Last edit</div>
-                            <div className="timeline-value">{lastEdited}</div>
-                          </div>
-                          <div>
-                            <div className="timeline-label">Last review</div>
-                            <div className="timeline-value">{lastReviewed}</div>
-                          </div>
-                        </div>
-                        <div className="library-card-actions">
-                        <button
-                          className="ghost-button"
-                          type="button"
-                          onClick={() => {
-                            router.push(`/?doc=${entry.id}`);
-                          }}
-                        >
-                          Open
-                        </button>
-                          <button
-                            className="primary-button"
-                            type="button"
-                            disabled={!entry.latest_version_id}
-                            onClick={() => {
-                              if (!entry.latest_version_id) return;
-                              router.push(`/?doc=${entry.id}&run=1`);
-                            }}
-                          >
-                            Run Review
-                          </button>
-                          <button
-                            className="ghost-button"
-                            type="button"
-                            disabled={!entry.latest_version_id}
-                            onClick={() => {
-                              if (!entry.latest_version_id) return;
-                              const confirmed = window.confirm(
-                                `Start a new review run for "${entry.title}"?`
-                              );
-                              if (!confirmed) return;
-                              router.push(`/?doc=${entry.id}&run=1`);
-                            }}
-                          >
-                            Re-run
-                          </button>
-                          <button
-                            className="ghost-button"
-                            type="button"
-                            onClick={() => void handleSetArchived(entry.id, !entry.is_archived)}
-                          >
-                            {entry.is_archived ? 'Restore' : 'Archive'}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+        <LibraryPanel
+          libraryEntries={libraryEntries}
+          bulkProgress={bulkProgress}
+          isBundleImporting={isBundleImporting}
+          onImportBundle={handleImportReviewBundleFiles}
+          onBulkArchive={handleBulkArchive}
+          onBulkRerun={handleBulkRerun}
+          onBulkDelete={handleBulkDelete}
+          onDeleteDocument={handleDeleteDocument}
+          onSetArchived={handleSetArchived}
+        />
       )}
 
       {showHistory && (
-        <div className="library-overlay">
-          <div className="library-shell">
-            <div className="library-header">
-              <div>
-                <div className="library-title">History</div>
-                <div className="library-sub">
-                  Review runs across your workspace and Git-backed document commits.
-                </div>
-              </div>
-              <div className="library-actions">
-                <select
-                  className="input compact"
-                  value={historyDocumentId ?? ''}
-                  onChange={(event) => {
-                    const raw = event.target.value;
-                    if (!raw) {
-                      setHistoryDocumentId(null);
-                      return;
-                    }
-                    const next = Number(raw);
-                    setHistoryDocumentId(Number.isFinite(next) ? next : null);
-                  }}
-                >
-                  <option value="">No document selected</option>
-                  {libraryEntries.map((entry) => (
-                    <option key={`history-doc-${entry.id}`} value={entry.id}>
-                      {entry.title}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="ghost-button"
-                  type="button"
-                  onClick={() => void refreshHistoryPanel(historyDocumentId)}
-                  disabled={isHistoryLoading}
-                >
-                  {isHistoryLoading ? 'Refreshing…' : 'Refresh'}
-                </button>
-                {historyDocumentId && (
-                  <button
-                    className="primary-button"
-                    type="button"
-                    onClick={() => router.push(`/?doc=${historyDocumentId}`)}
-                  >
-                    Open Document
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="admin-grid">
-              <section className="admin-card wide">
-                <div className="drawer-title">Review Runs</div>
-                <div className="history-list">
-                  {historyJobs.length === 0 && (
-                    <div className="subtle">No review runs yet.</div>
-                  )}
-                  {historyJobs.map((job) => (
-                    <div key={`history-job-${job.id}`} className="history-item">
-                      <div>
-                        <div className="history-msg">
-                          #{job.id} {job.status} · version {job.document_version_id}
-                        </div>
-                        <div className="history-time">
-                          {new Date(job.created_at).toLocaleString()}
-                          {job.completed_at
-                            ? ` · completed ${new Date(job.completed_at).toLocaleString()}`
-                            : ''}
-                        </div>
-                      </div>
-                      <span className="pill">
-                        {job.provider}/{job.model}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="admin-card wide">
-                <div className="drawer-title">Document Commits</div>
-                <div className="history-list">
-                  {!historyDocumentId && (
-                    <div className="subtle">Select a document to view commit history.</div>
-                  )}
-                  {historyDocumentId && history.length === 0 && (
-                    <div className="subtle">No commits yet for this document.</div>
-                  )}
-                  {history.map((commit) => (
-                    <div key={`history-commit-${commit.sha}`} className="history-item">
-                      <div>
-                        <div className="history-msg">{commit.message}</div>
-                        <div className="history-time">
-                          {new Date(commit.authored_at).toLocaleString()}
-                        </div>
-                      </div>
-                      <span className="pill">{commit.sha.slice(0, 7)}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            </div>
-          </div>
-        </div>
+        <HistoryPanel
+          libraryEntries={libraryEntries}
+          selectedDocumentId={selectedDocumentId}
+          onStatus={setStatusMessage}
+          onError={setErrorMessage}
+        />
       )}
 
       {showAgents && (
@@ -4586,1055 +3869,21 @@ function HomePageContent() {
       )}
 
       {showAdmin && (
-        <div className="admin-overlay">
-          <div className="admin-shell">
-            <div className="admin-header">
-              <div>
-                <div className="library-title">Administrator</div>
-                <div className="library-sub">
-                  Repository visibility, user access control, document permissions, and review operations.
-                </div>
-              </div>
-              <button className="ghost-button" type="button" onClick={() => void refreshAdminData()}>
-                Refresh
-              </button>
-            </div>
-
-            <div className="admin-grid">
-              <section className="admin-card">
-                <div className="drawer-title">Repository</div>
-                <div className="admin-kv">Enabled: {adminOverview?.repository.enabled ? 'Yes' : 'No'}</div>
-                <div className="admin-kv">Root: {adminOverview?.repository.root ?? '—'}</div>
-                <div className="admin-kv">Tenant Repo Path: {adminOverview?.repository.tenant_root ?? '—'}</div>
-                <div className="admin-kv">
-                  Repositories: {adminOverview?.repository.repository_count ?? 0}
-                </div>
-              </section>
-
-              <section className="admin-card">
-                <div className="drawer-title">Summary</div>
-                <div className="admin-stats">
-                  <div className="stat">
-                    <div className="stat-label">Users</div>
-                    <div className="stat-value">{adminOverview?.users.total ?? 0}</div>
-                  </div>
-                  <div className="stat">
-                    <div className="stat-label">Admins</div>
-                    <div className="stat-value">{adminOverview?.users.admins ?? 0}</div>
-                  </div>
-                  <div className="stat">
-                    <div className="stat-label">Documents</div>
-                    <div className="stat-value">{adminOverview?.documents.total ?? 0}</div>
-                  </div>
-                  <div className="stat">
-                    <div className="stat-label">In Progress Jobs</div>
-                    <div className="stat-value">{adminOverview?.jobs.in_progress ?? 0}</div>
-                  </div>
-                </div>
-              </section>
-
-              <section className="admin-card wide">
-                <div className="drawer-title">Work In Progress</div>
-                <div className="history-list">
-                  {(adminOverview?.in_progress_jobs ?? []).length === 0 && (
-                    <div className="subtle">No jobs currently running.</div>
-                  )}
-                  {(adminOverview?.in_progress_jobs ?? []).map((job) => (
-                    <div key={job.id} className="history-item">
-                      <div>
-                        <div className="history-msg">
-                          #{job.id} {job.status} · {job.document_title}
-                        </div>
-                        <div className="history-time">
-                          {new Date(job.created_at).toLocaleString()} · {job.provider}/{job.model}
-                        </div>
-                      </div>
-                      <span className="pill">{job.trigger}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="admin-card wide">
-                <div className="drawer-title">Historical Jobs</div>
-                <div className="history-list">
-                  {(adminOverview?.recent_jobs ?? []).length === 0 && (
-                    <div className="subtle">No jobs yet.</div>
-                  )}
-                  {(adminOverview?.recent_jobs ?? []).slice(0, 20).map((job) => (
-                    <div key={job.id} className="history-item">
-                      <div>
-                        <div className="history-msg">
-                          #{job.id} {job.status} · {job.document_title}
-                        </div>
-                        <div className="history-time">
-                          {new Date(job.created_at).toLocaleString()}
-                          {job.completed_at ? ` · completed ${new Date(job.completed_at).toLocaleString()}` : ''}
-                        </div>
-                      </div>
-                      <span className="pill">
-                        {job.provider}/{job.model}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="admin-card">
-                <div className="drawer-title">Users</div>
-                <div className="admin-user-create">
-                  <input
-                    className="input"
-                    placeholder="Name"
-                    value={newAdminUser.name}
-                    onChange={(event) =>
-                      setNewAdminUser((prev) => ({ ...prev, name: event.target.value }))
-                    }
-                  />
-                  <input
-                    className="input"
-                    placeholder="Email"
-                    value={newAdminUser.email}
-                    onChange={(event) =>
-                      setNewAdminUser((prev) => ({ ...prev, email: event.target.value }))
-                    }
-                  />
-                  <select
-                    className="input"
-                    value={newAdminUser.role}
-                    onChange={(event) =>
-                      setNewAdminUser((prev) => ({
-                        ...prev,
-                        role: event.target.value as 'admin' | 'default'
-                      }))
-                    }
-                  >
-                    <option value="default">Default</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                  <button className="primary-button" type="button" onClick={() => void handleCreateAdminUser()}>
-                    Add User
-                  </button>
-                </div>
-                <div className="history-list">
-                  {adminUsers.map((user) => (
-                    <div key={user.id} className="history-item">
-                      <div>
-                        <div className="history-msg">
-                          {user.name} · {user.email}
-                        </div>
-                        <div className="history-time">Created {new Date(user.created_at).toLocaleString()}</div>
-                      </div>
-                      <div className="admin-user-actions">
-                        <select
-                          className="input compact"
-                          value={user.role}
-                          onChange={(event) =>
-                            void handleUpdateAdminUser(user.id, {
-                              role: event.target.value as 'admin' | 'default'
-                            })
-                          }
-                        >
-                          <option value="default">default</option>
-                          <option value="admin">admin</option>
-                        </select>
-                        <button
-                          className="ghost-button"
-                          type="button"
-                          onClick={() =>
-                            void handleUpdateAdminUser(user.id, {
-                              is_active: !user.is_active
-                            })
-                          }
-                        >
-                          {user.is_active ? 'Disable' : 'Enable'}
-                        </button>
-                        <button
-                          className="ghost-button danger-button"
-                          type="button"
-                          onClick={() => void handleDeleteAdminUser(user.id)}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="admin-card">
-                <div className="drawer-title">Document Permissions</div>
-                <select
-                  className="input"
-                  value={selectedPermissionDocumentId ?? ''}
-                  onChange={(event) => {
-                    const rawValue = event.target.value;
-                    if (!rawValue) {
-                      setSelectedPermissionDocumentId(null);
-                      return;
-                    }
-                    const value = Number(rawValue);
-                    setSelectedPermissionDocumentId(Number.isFinite(value) ? value : null);
-                  }}
-                >
-                  <option value="">Select document</option>
-                  {libraryEntries.map((entry) => (
-                    <option key={entry.id} value={entry.id}>
-                      {entry.title}
-                    </option>
-                  ))}
-                </select>
-                <div className="spacer" />
-                <div className="admin-user-create">
-                  <select
-                    className="input"
-                    value={newPermission.user_id}
-                    onChange={(event) =>
-                      setNewPermission((prev) => ({
-                        ...prev,
-                        user_id: Number(event.target.value)
-                      }))
-                    }
-                  >
-                    <option value={0}>Select user</option>
-                    {adminUsers.map((user) => (
-                      <option key={user.id} value={user.id}>
-                        {user.name} ({user.email})
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="input"
-                    value={newPermission.permission_level}
-                    onChange={(event) =>
-                      setNewPermission((prev) => ({
-                        ...prev,
-                        permission_level: event.target.value as 'owner' | 'editor' | 'viewer'
-                      }))
-                    }
-                  >
-                    <option value="viewer">viewer</option>
-                    <option value="editor">editor</option>
-                    <option value="owner">owner</option>
-                  </select>
-                  <button className="primary-button" type="button" onClick={() => void handleCreatePermission()}>
-                    Grant/Update
-                  </button>
-                </div>
-                <div className="history-list">
-                  {visibleAdminPermissions.map((perm) => (
-                    <div key={perm.id} className="history-item">
-                      <div>
-                        <div className="history-msg">
-                          {perm.user_name} · {perm.user_email}
-                        </div>
-                        <div className="history-time">Added {new Date(perm.created_at).toLocaleString()}</div>
-                      </div>
-                      <div className="admin-user-actions">
-                        <select
-                          className="input compact"
-                          value={perm.permission_level}
-                          onChange={(event) =>
-                            void handleUpdatePermission(
-                              perm.id,
-                              event.target.value as 'owner' | 'editor' | 'viewer'
-                            )
-                          }
-                        >
-                          <option value="viewer">viewer</option>
-                          <option value="editor">editor</option>
-                          <option value="owner">owner</option>
-                        </select>
-                        <button
-                          className="ghost-button danger-button"
-                          type="button"
-                          onClick={() => void handleDeletePermission(perm.id)}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="admin-card wide">
-                <div className="drawer-title">Permission Matrix</div>
-                {adminUsers.length === 0 || libraryEntries.length === 0 ? (
-                  <div className="subtle">Add users and documents to view matrix.</div>
-                ) : (
-                  <div className="admin-matrix-wrap">
-                    <table className="admin-matrix">
-                      <thead>
-                        <tr>
-                          <th>User</th>
-                          {libraryEntries.slice(0, 8).map((entry) => (
-                            <th key={`head-${entry.id}`}>{entry.title}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {adminUsers.map((user) => (
-                          <tr key={`row-${user.id}`}>
-                            <td>{user.name}</td>
-                            {libraryEntries.slice(0, 8).map((entry) => {
-                              const perm = adminPermissions.find(
-                                (item) => item.user_id === user.id && item.document_id === entry.id
-                              );
-                              return (
-                                <td key={`cell-${user.id}-${entry.id}`}>
-                                  <span className="meta-pill">{perm?.permission_level ?? '—'}</span>
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </section>
-
-              <section className="admin-card wide">
-                <div className="drawer-title">Recent Admin Actions</div>
-                <div className="history-list">
-                  {(adminOverview?.recent_actions ?? []).length === 0 && (
-                    <div className="subtle">No admin actions logged yet.</div>
-                  )}
-                  {(adminOverview?.recent_actions ?? []).map((action) => (
-                    <div key={action.id} className="history-item">
-                      <div>
-                        <div className="history-msg">
-                          {action.action} · {action.target_type}
-                          {action.target_id ? ` #${action.target_id}` : ''}
-                        </div>
-                        <div className="history-time">
-                          {action.actor_email ?? 'unknown'} ·{' '}
-                          {new Date(action.created_at).toLocaleString()}
-                        </div>
-                      </div>
-                      <span className="pill">{action.details ?? ''}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            </div>
-          </div>
-        </div>
+        <AdminPanel
+          libraryEntries={libraryEntries}
+          onStatus={setStatusMessage}
+          onError={setErrorMessage}
+        />
       )}
 
       {showSettings && (
-        <div className="system-overlay">
-          <div className="system-shell">
-            <div className="system-header">
-              <div>
-                <div className="library-title">System Configuration</div>
-                <div className="library-sub">
-                  Manage provider, queue, storage, CORS, and local client connection settings.
-                </div>
-              </div>
-              <div className="system-status-pills">
-                <span className={`status-pill ${systemStatus?.redis.ok ? 'ok' : 'warn'}`}>
-                  Redis {systemStatus?.redis.ok ? 'OK' : 'Down'}
-                </span>
-                <span
-                  className={`status-pill ${
-                    systemStatus && (systemStatus.llm?.ok ?? systemStatus.openai.ok) ? 'ok' : 'warn'
-                  }`}
-                >
-                  LLM {systemStatus && (systemStatus.llm?.ok ?? systemStatus.openai.ok) ? 'OK' : 'Issue'}
-                </span>
-                <span className={`status-pill ${workerMonitor?.redis_ok ? 'ok' : 'warn'}`}>
-                  Workers {workerMonitor?.redis_ok ? 'Online' : 'Unavailable'}
-                </span>
-              </div>
-            </div>
-
-            {systemConfig && (
-              <div className="system-grid">
-                <section className="system-card">
-                  <div className="drawer-title">LLM Provider</div>
-                  <label className="subtle">Provider</label>
-                  <select
-                    className="input"
-                    value={systemConfig.llm_provider}
-                    onChange={(event) =>
-                      setSystemConfig((prev) =>
-                        prev
-                          ? { ...prev, llm_provider: event.target.value as 'openai' | 'bedrock' }
-                          : prev
-                      )
-                    }
-                  >
-                    <option value="openai">OpenAI</option>
-                    <option value="bedrock">AWS Bedrock</option>
-                  </select>
-                  <div className="spacer" />
-                  <label className="subtle">OpenAI Model</label>
-                  <input
-                    className="input"
-                    value={systemConfig.openai_model}
-                    onChange={(event) =>
-                      setSystemConfig((prev) =>
-                        prev ? { ...prev, openai_model: event.target.value } : prev
-                      )
-                    }
-                    placeholder="gpt-4o-mini"
-                  />
-                  <div className="grid-two">
-                    <div>
-                      <label className="subtle">Max Tokens</label>
-                      <input
-                        className="input"
-                        type="number"
-                        value={systemConfig.openai_max_tokens}
-                        onChange={(event) =>
-                          setSystemConfig((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  openai_max_tokens: Math.max(1, Number(event.target.value) || 1)
-                                }
-                              : prev
-                          )
-                        }
-                      />
-                    </div>
-                    <div>
-                      <label className="subtle">Timeout (sec)</label>
-                      <input
-                        className="input"
-                        type="number"
-                        value={systemConfig.openai_timeout_seconds}
-                        onChange={(event) =>
-                          setSystemConfig((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  openai_timeout_seconds: Math.max(1, Number(event.target.value) || 1)
-                                }
-                              : prev
-                          )
-                        }
-                      />
-                    </div>
-                  </div>
-                  <div className="spacer" />
-                  <label className="subtle">Bedrock Model ID</label>
-                  <input
-                    className="input"
-                    value={systemConfig.bedrock_model_id}
-                    onChange={(event) =>
-                      setSystemConfig((prev) =>
-                        prev ? { ...prev, bedrock_model_id: event.target.value } : prev
-                      )
-                    }
-                    placeholder="anthropic.claude-3-5-haiku-20241022-v1:0"
-                  />
-                  <div className="spacer" />
-                  <label className="subtle">Bedrock Region</label>
-                  <input
-                    className="input"
-                    value={systemConfig.bedrock_region}
-                    onChange={(event) =>
-                      setSystemConfig((prev) =>
-                        prev ? { ...prev, bedrock_region: event.target.value } : prev
-                      )
-                    }
-                    placeholder="us-east-1"
-                  />
-                  <div className="spacer" />
-                  <label className="toggle-row">
-                    <input
-                      type="checkbox"
-                      checked={systemConfig.review_inline}
-                      onChange={(event) =>
-                        setSystemConfig((prev) =>
-                          prev ? { ...prev, review_inline: event.target.checked } : prev
-                        )
-                      }
-                    />
-                    Run reviews inline (skip worker queue)
-                  </label>
-                </section>
-
-                <section className="system-card">
-                  <div className="drawer-title">Secrets</div>
-                  <div className="system-secret-row">
-                    <div className="subtle">OpenAI API Key</div>
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => {
-                        const value = window.prompt(
-                          `OpenAI API key (${systemConfig.openai_api_key_set ? 'set' : 'not set'})`,
-                          ''
-                        );
-                        if (value !== null) {
-                          void handleSaveSecret('openai_api_key', value);
-                        }
-                      }}
-                    >
-                      {systemConfig.openai_api_key_set ? 'Update' : 'Set'}
-                    </button>
-                  </div>
-                  <div className="system-secret-row">
-                    <div className="subtle">Bedrock Access Key ID</div>
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => {
-                        const value = window.prompt(
-                          `Bedrock access key (${systemConfig.bedrock_access_key_set ? 'set' : 'not set'})`,
-                          ''
-                        );
-                        if (value !== null) {
-                          void handleSaveSecret('bedrock_aws_access_key_id', value);
-                        }
-                      }}
-                    >
-                      {systemConfig.bedrock_access_key_set ? 'Update' : 'Set'}
-                    </button>
-                  </div>
-                  <div className="system-secret-row">
-                    <div className="subtle">Bedrock Secret Access Key</div>
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => {
-                        const value = window.prompt(
-                          `Bedrock secret key (${systemConfig.bedrock_secret_key_set ? 'set' : 'not set'})`,
-                          ''
-                        );
-                        if (value !== null) {
-                          void handleSaveSecret('bedrock_aws_secret_access_key', value);
-                        }
-                      }}
-                    >
-                      {systemConfig.bedrock_secret_key_set ? 'Update' : 'Set'}
-                    </button>
-                  </div>
-                  <div className="system-secret-row">
-                    <div className="subtle">Bedrock Session Token (optional)</div>
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => {
-                        const value = window.prompt(
-                          `Bedrock session token (${systemConfig.bedrock_session_token_set ? 'set' : 'not set'})`,
-                          ''
-                        );
-                        if (value !== null) {
-                          void handleSaveSecret('bedrock_aws_session_token', value);
-                        }
-                      }}
-                    >
-                      {systemConfig.bedrock_session_token_set ? 'Update' : 'Set'}
-                    </button>
-                  </div>
-                </section>
-
-                <section className="system-card">
-                  <div className="drawer-title">Queue Monitor</div>
-                  <div className="queue-stats-grid">
-                    <div className="queue-stat">
-                      <div className="subtle">Queue</div>
-                      <div className="queue-stat-value">{workerMonitor?.queue?.name ?? 'review-jobs'}</div>
-                    </div>
-                    <div className="queue-stat">
-                      <div className="subtle">Queued</div>
-                      <div className="queue-stat-value">{workerMonitor?.queue?.queued ?? 0}</div>
-                    </div>
-                    <div className="queue-stat">
-                      <div className="subtle">Running</div>
-                      <div className="queue-stat-value">{workerMonitor?.queue?.started ?? 0}</div>
-                    </div>
-                    <div className="queue-stat">
-                      <div className="subtle">Failed</div>
-                      <div className="queue-stat-value">{workerMonitor?.queue?.failed ?? 0}</div>
-                    </div>
-                    <div className="queue-stat">
-                      <div className="subtle">Deferred</div>
-                      <div className="queue-stat-value">{workerMonitor?.queue?.deferred ?? 0}</div>
-                    </div>
-                    <div className="queue-stat">
-                      <div className="subtle">Scheduled</div>
-                      <div className="queue-stat-value">{workerMonitor?.queue?.scheduled ?? 0}</div>
-                    </div>
-                  </div>
-                  <div className="spacer" />
-                  <div className="drawer-title">Workers</div>
-                  <div className="worker-list">
-                    {(workerMonitor?.workers ?? []).length === 0 && (
-                      <div className="subtle">
-                        {isWorkerMonitorLoading ? 'Loading workers…' : 'No worker heartbeat detected.'}
-                      </div>
-                    )}
-                    {(workerMonitor?.workers ?? []).map((worker) => (
-                      <div className="worker-row" key={worker.name}>
-                        <div>
-                          <div className="history-msg">{worker.name}</div>
-                          <div className="history-time">
-                            state={worker.state}
-                            {worker.current_job_id ? ` · job=${worker.current_job_id}` : ''}
-                          </div>
-                        </div>
-                        <span className="pill">
-                          {worker.last_heartbeat
-                            ? new Date(worker.last_heartbeat).toLocaleTimeString()
-                            : 'no heartbeat'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  {workerMonitor?.redis_error && (
-                    <div className="subtle">Redis error: {workerMonitor.redis_error}</div>
-                  )}
-                </section>
-
-                <section className="system-card system-card-span">
-                  <div className="system-card-head">
-                    <div className="drawer-title">Worker Logs</div>
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => void loadWorkerMonitor()}
-                      disabled={isWorkerMonitorLoading}
-                    >
-                      {isWorkerMonitorLoading ? 'Refreshing…' : 'Refresh Logs'}
-                    </button>
-                  </div>
-                  <div className="worker-log-list">
-                    {(workerMonitor?.logs ?? []).length === 0 && (
-                      <div className="subtle">
-                        {isWorkerMonitorLoading ? 'Loading logs…' : 'No worker events yet.'}
-                      </div>
-                    )}
-                    {(workerMonitor?.logs ?? []).map((event) => (
-                      <div className={`worker-log-row ${event.level}`} key={event.id}>
-                        <div>
-                          <div className="history-msg">
-                            {event.message}
-                            {event.document_title ? ` · ${event.document_title}` : ''}
-                          </div>
-                          <div className="history-time">
-                            {new Date(event.timestamp).toLocaleString()} · {event.source}
-                            {event.review_job_id ? ` · review #${event.review_job_id}` : ''}
-                            {event.rq_job_id ? ` · rq ${event.rq_job_id}` : ''}
-                          </div>
-                          {event.detail && <div className="subtle worker-log-detail">{event.detail}</div>}
-                        </div>
-                        <span className={`status-pill ${event.level === 'error' ? 'warn' : 'neutral'}`}>
-                          {event.level}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-
-                <section className="system-card">
-                  <div className="drawer-title">Queue & Storage</div>
-                  <label className="subtle">Redis URL</label>
-                  <input
-                    className="input"
-                    value={systemConfig.redis_url}
-                    onChange={(event) =>
-                      setSystemConfig((prev) => (prev ? { ...prev, redis_url: event.target.value } : prev))
-                    }
-                  />
-                  <div className="spacer" />
-                  <label className="subtle">Review Queue Name</label>
-                  <input
-                    className="input"
-                    value={systemConfig.review_queue_name}
-                    onChange={(event) =>
-                      setSystemConfig((prev) =>
-                        prev ? { ...prev, review_queue_name: event.target.value } : prev
-                      )
-                    }
-                  />
-                  <div className="spacer" />
-                  <label className="subtle">Document Repo Root</label>
-                  <input
-                    className="input"
-                    value={systemConfig.doc_repo_root}
-                    onChange={(event) =>
-                      setSystemConfig((prev) =>
-                        prev ? { ...prev, doc_repo_root: event.target.value } : prev
-                      )
-                    }
-                  />
-                  <div className="spacer" />
-                  <label className="toggle-row">
-                    <input
-                      type="checkbox"
-                      checked={systemConfig.doc_repo_enabled}
-                      onChange={(event) =>
-                        setSystemConfig((prev) =>
-                          prev ? { ...prev, doc_repo_enabled: event.target.checked } : prev
-                        )
-                      }
-                    />
-                    Enable document git repository persistence
-                  </label>
-                </section>
-
-                <section className="system-card">
-                  <div className="drawer-title">CORS</div>
-                  <label className="subtle">Allowed Origins (comma separated)</label>
-                  <input
-                    className="input"
-                    value={systemConfig.cors_allow_origins}
-                    onChange={(event) =>
-                      setSystemConfig((prev) =>
-                        prev ? { ...prev, cors_allow_origins: event.target.value } : prev
-                      )
-                    }
-                    placeholder="http://localhost:3000,https://opinion.zlyxy.me"
-                  />
-                  <div className="spacer" />
-                  <label className="subtle">Allowed Origin Regex (optional)</label>
-                  <input
-                    className="input"
-                    value={systemConfig.cors_allow_origin_regex ?? ''}
-                    onChange={(event) =>
-                      setSystemConfig((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              cors_allow_origin_regex: event.target.value.trim() || null
-                            }
-                          : prev
-                      )
-                    }
-                    placeholder="https://.*\\.zlyxy\\.me"
-                  />
-                  <div className="grid-two">
-                    <div>
-                      <label className="subtle">Allow Methods</label>
-                      <input
-                        className="input"
-                        value={systemConfig.cors_allow_methods}
-                        onChange={(event) =>
-                          setSystemConfig((prev) =>
-                            prev ? { ...prev, cors_allow_methods: event.target.value } : prev
-                          )
-                        }
-                        placeholder="*"
-                      />
-                    </div>
-                    <div>
-                      <label className="subtle">Allow Headers</label>
-                      <input
-                        className="input"
-                        value={systemConfig.cors_allow_headers}
-                        onChange={(event) =>
-                          setSystemConfig((prev) =>
-                            prev ? { ...prev, cors_allow_headers: event.target.value } : prev
-                          )
-                        }
-                        placeholder="*"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid-two">
-                    <label className="toggle-row">
-                      <input
-                        type="checkbox"
-                        checked={systemConfig.cors_allow_credentials}
-                        onChange={(event) =>
-                          setSystemConfig((prev) =>
-                            prev ? { ...prev, cors_allow_credentials: event.target.checked } : prev
-                          )
-                        }
-                      />
-                      Allow credentials
-                    </label>
-                    <div>
-                      <label className="subtle">Max Age (sec)</label>
-                      <input
-                        className="input"
-                        type="number"
-                        value={systemConfig.cors_max_age}
-                        onChange={(event) =>
-                          setSystemConfig((prev) =>
-                            prev
-                              ? { ...prev, cors_max_age: Math.max(0, Number(event.target.value) || 0) }
-                              : prev
-                          )
-                        }
-                      />
-                    </div>
-                  </div>
-                </section>
-
-                <section className="system-card">
-                  <div className="drawer-title">Meta Agent</div>
-                  <label className="subtle">Name</label>
-                  <input
-                    className="input"
-                    value={systemConfig.meta_agent_name}
-                    onChange={(event) =>
-                      setSystemConfig((prev) =>
-                        prev ? { ...prev, meta_agent_name: event.target.value } : prev
-                      )
-                    }
-                    placeholder="Meta Reviewer"
-                  />
-                  <div className="spacer" />
-                  <label className="subtle">Description</label>
-                  <input
-                    className="input"
-                    value={systemConfig.meta_agent_description}
-                    onChange={(event) =>
-                      setSystemConfig((prev) =>
-                        prev ? { ...prev, meta_agent_description: event.target.value } : prev
-                      )
-                    }
-                    placeholder="Synthesizes reviewer comments into ranked directives."
-                  />
-                  <div className="spacer" />
-                  <label className="subtle">System Prompt</label>
-                  <textarea
-                    className="input textarea"
-                    rows={4}
-                    value={systemConfig.meta_agent_system_prompt}
-                    onChange={(event) =>
-                      setSystemConfig((prev) =>
-                        prev ? { ...prev, meta_agent_system_prompt: event.target.value } : prev
-                      )
-                    }
-                  />
-                  <div className="spacer" />
-                  <label className="subtle">Focus Areas (comma separated)</label>
-                  <input
-                    className="input"
-                    value={systemConfig.meta_agent_focus_areas}
-                    onChange={(event) =>
-                      setSystemConfig((prev) =>
-                        prev ? { ...prev, meta_agent_focus_areas: event.target.value } : prev
-                      )
-                    }
-                    placeholder="deduplication,conflict resolution,actionability"
-                  />
-                  <div className="grid-two">
-                    <div>
-                      <label className="subtle">Tone</label>
-                      <input
-                        className="input"
-                        value={systemConfig.meta_agent_tone}
-                        onChange={(event) =>
-                          setSystemConfig((prev) =>
-                            prev ? { ...prev, meta_agent_tone: event.target.value } : prev
-                          )
-                        }
-                        placeholder="decisive, practical"
-                      />
-                    </div>
-                    <div>
-                      <label className="subtle">Output Format</label>
-                      <input
-                        className="input"
-                        value={systemConfig.meta_agent_output_format}
-                        onChange={(event) =>
-                          setSystemConfig((prev) =>
-                            prev ? { ...prev, meta_agent_output_format: event.target.value } : prev
-                          )
-                        }
-                        placeholder="bullet_list"
-                      />
-                    </div>
-                  </div>
-                  <div className="spacer" />
-                  <label className="subtle">Reference Notes (optional)</label>
-                  <textarea
-                    className="input textarea"
-                    rows={3}
-                    value={systemConfig.meta_agent_reference_notes ?? ''}
-                    onChange={(event) =>
-                      setSystemConfig((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              meta_agent_reference_notes: event.target.value.trim() || null
-                            }
-                          : prev
-                      )
-                    }
-                  />
-                  <div className="spacer" />
-                  <label className="subtle">Examples (comma separated)</label>
-                  <input
-                    className="input"
-                    value={systemConfig.meta_agent_examples}
-                    onChange={(event) =>
-                      setSystemConfig((prev) =>
-                        prev ? { ...prev, meta_agent_examples: event.target.value } : prev
-                      )
-                    }
-                    placeholder="Use active voice,Always include next action"
-                  />
-                  <div className="grid-two">
-                    <div>
-                      <label className="subtle">Max bullets</label>
-                      <input
-                        className="input"
-                        type="number"
-                        value={systemConfig.meta_agent_output_max_bullets}
-                        onChange={(event) =>
-                          setSystemConfig((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  meta_agent_output_max_bullets: Math.max(
-                                    1,
-                                    Number(event.target.value) || 1
-                                  )
-                                }
-                              : prev
-                          )
-                        }
-                      />
-                    </div>
-                    <div>
-                      <label className="subtle">Max directives per group</label>
-                      <input
-                        className="input"
-                        type="number"
-                        value={systemConfig.meta_max_directives_per_group}
-                        onChange={(event) =>
-                          setSystemConfig((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  meta_max_directives_per_group: Math.max(
-                                    1,
-                                    Number(event.target.value) || 1
-                                  )
-                                }
-                              : prev
-                          )
-                        }
-                      />
-                    </div>
-                  </div>
-                  <div className="spacer" />
-                  <label className="subtle">Global dedupe threshold (0-1)</label>
-                  <input
-                    className="input"
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    max={1}
-                    value={systemConfig.meta_global_dedupe_threshold}
-                    onChange={(event) =>
-                      setSystemConfig((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              meta_global_dedupe_threshold: Math.min(
-                                1,
-                                Math.max(0, Number(event.target.value) || 0)
-                              )
-                            }
-                          : prev
-                      )
-                    }
-                  />
-                  <div className="spacer" />
-                  <label className="toggle-row">
-                    <input
-                      type="checkbox"
-                      checked={systemConfig.meta_agent_output_require_actionable}
-                      onChange={(event) =>
-                        setSystemConfig((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                meta_agent_output_require_actionable: event.target.checked
-                              }
-                            : prev
-                        )
-                      }
-                    />
-                    Require actionable directives
-                  </label>
-                  <label className="toggle-row">
-                    <input
-                      type="checkbox"
-                      checked={systemConfig.meta_agent_output_require_quote_excerpt}
-                      onChange={(event) =>
-                        setSystemConfig((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                meta_agent_output_require_quote_excerpt: event.target.checked
-                              }
-                            : prev
-                        )
-                      }
-                    />
-                    Require quote excerpts
-                  </label>
-                  <label className="toggle-row">
-                    <input
-                      type="checkbox"
-                      checked={systemConfig.meta_agent_output_include_severity}
-                      onChange={(event) =>
-                        setSystemConfig((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                meta_agent_output_include_severity: event.target.checked
-                              }
-                            : prev
-                        )
-                      }
-                    />
-                    Include severity/priority guidance
-                  </label>
-                </section>
-
-                <section className="system-card">
-                  <div className="drawer-title">Client Connection</div>
-                  <label className="subtle">API Base</label>
-                  <input
-                    className="input"
-                    value={apiBase}
-                    onChange={(event) => setApiBaseState(event.target.value)}
-                    placeholder="https://odr.zlyxy.me/api"
-                  />
-                  <div className="spacer" />
-                  <label className="subtle">Tenant ID</label>
-                  <input
-                    className="input"
-                    value={tenantId}
-                    onChange={(event) => setTenantIdState(event.target.value)}
-                    placeholder={DEFAULT_TENANT}
-                  />
-                  <div className="spacer" />
-                  <label className="subtle">OIDC/JWT Access Token</label>
-                  <input
-                    className="input"
-                    value={accessToken}
-                    onChange={(event) => setAccessTokenState(event.target.value)}
-                    placeholder="Paste bearer token (stored in localStorage)"
-                  />
-                  <div className="spacer" />
-                  <button className="ghost-button" type="button" onClick={handleTenantSave}>
-                    Save Connection
-                  </button>
-                </section>
-              </div>
-            )}
-
-            <div className="system-footer">
-              <button className="primary-button" type="button" onClick={() => void handleSystemConfigSave()}>
-                Save Backend Settings
-              </button>
-            </div>
-          </div>
-        </div>
+        <SystemPanel
+          systemStatus={systemStatus}
+          onStatus={setStatusMessage}
+          onError={setErrorMessage}
+          onTenantConnectionSaved={() => { void refreshAll(); }}
+          onSystemStatusRefresh={() => { void loadSystemStatus(); }}
+        />
       )}
 
     </main>
