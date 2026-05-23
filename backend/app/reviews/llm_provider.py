@@ -32,6 +32,38 @@ def generate_completion(prompt: str) -> str:
     raise LLMProviderError(f"Unsupported LLM provider: {settings.LLM_PROVIDER}")
 
 
+def generate_embeddings(texts: list[str]) -> list[list[float]]:
+    """Return one embedding vector per input text.
+
+    Only the OpenAI provider is supported today; Bedrock raises
+    LLMProviderError so callers can decide to fall back to non-embedding
+    logic. Callers MUST handle this exception — embeddings are an
+    optional optimization, not a hard dependency.
+    """
+    if not texts:
+        return []
+    provider = get_provider_name()
+    if provider != "openai":
+        raise LLMProviderError(
+            f"Embeddings not supported for provider: {settings.LLM_PROVIDER}"
+        )
+    client = get_openai_client()
+    try:
+        response = client.embeddings.create(
+            model=settings.OPENAI_EMBEDDING_MODEL,
+            input=texts,
+        )
+    except OpenAIError as exc:
+        raise LLMProviderError(str(exc)) from exc
+    # OpenAI returns results in the same order as input but expose the
+    # `index` field so we normalize to the input order explicitly.
+    ordered: list[list[float]] = [[] for _ in texts]
+    for item in response.data:
+        if 0 <= item.index < len(ordered):
+            ordered[item.index] = list(item.embedding)
+    return ordered
+
+
 def provider_health() -> dict[str, Any]:
     provider = get_provider_name()
     if provider == "openai":

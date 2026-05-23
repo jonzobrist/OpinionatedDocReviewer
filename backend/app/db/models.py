@@ -52,8 +52,12 @@ class Persona(Base):
 
 class Document(Base):
     __tablename__ = "documents"
+    # Prevent SQLite rowid reuse after DELETE: a new row must never take the
+    # id of a previously-deleted document, because stale on-disk artifacts
+    # (git repos, queued jobs) reference documents by id.
+    __table_args__ = {"sqlite_autoincrement": True}
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
     title: Mapped[str] = mapped_column(String(300), index=True)
     tags: Mapped[list] = mapped_column(JSON, default=list)
@@ -73,8 +77,9 @@ class Document(Base):
 
 class DocumentVersion(Base):
     __tablename__ = "document_versions"
+    __table_args__ = {"sqlite_autoincrement": True}
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
     document_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("documents.id", ondelete="CASCADE")
@@ -90,8 +95,9 @@ class DocumentVersion(Base):
 
 class ReviewJob(Base):
     __tablename__ = "review_jobs"
+    __table_args__ = {"sqlite_autoincrement": True}
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
     document_version_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("document_versions.id", ondelete="CASCADE"), index=True

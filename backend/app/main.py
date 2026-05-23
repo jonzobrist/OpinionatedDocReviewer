@@ -6,6 +6,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from app.api.routes import api_router
 from app.core.config import settings
 from app.db.init_db import init_db
+from app.middleware.body_size_limit import BodySizeLimitMiddleware
 from app.middleware.csrf_guard import CsrfOriginGuardMiddleware
 from app.middleware.request_log import RequestLogMiddleware
 from app.middleware.rate_limit import SimpleRateLimitMiddleware
@@ -34,6 +35,7 @@ def create_app(init_db_on_startup: bool = True) -> FastAPI:
         allow_headers=settings.cors_allow_headers_list,
         max_age=settings.CORS_MAX_AGE,
     )
+    app.add_middleware(BodySizeLimitMiddleware)
     app.add_middleware(SimpleRateLimitMiddleware)
     app.add_middleware(CsrfOriginGuardMiddleware)
     app.add_middleware(RequestLogMiddleware)
