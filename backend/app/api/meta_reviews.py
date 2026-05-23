@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -9,7 +10,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_db, get_tenant_id
+from app.core.config import settings
 from app.db import models
+from app.reviews.llm_provider import LLMProviderError, generate_completion
 from app.reviews.meta_reviewer import (
     ensure_meta_review_run,
     normalize_meta_review_run_state,
@@ -21,6 +24,10 @@ from app.schemas.meta_review import (
     MetaReviewEnsureRequest,
     MetaReviewRunRead,
 )
+
+VALID_VERDICTS = {"clean", "review_needed", "problems"}
+LLM_VERDICT_MAX_COMMENTS = 10
+LLM_VERDICT_CONTENT_EXCERPT_CHARS = 1500
 
 router = APIRouter(prefix="/meta-reviews", tags=["meta-reviews"])
 logger = logging.getLogger(__name__)
@@ -217,6 +224,121 @@ def _clean_statement(verdict: str, clean_sections: list[str]) -> str:
     return "No section is clean enough to skip yet."
 
 
+def _llm_verdict_prompt(comments: list[models.MetaComment], content: str) -> str:
+    """Build the synthesis prompt for the go/no-go verdict pass.
+
+    The model sees: the top-N comments (priority + content), a short
+    excerpt of the document text, and a strict JSON-only contract. The
+    call is deliberately tiny — one sentence per directive, no sources,
+    no schema metadata — so it fits a fast short-context completion and
+    returns promptly even on large reviews.
+    """
+    excerpt = content.strip()[:LLM_VERDICT_CONTENT_EXCERPT_CHARS]
+    compact = [
+        {
+            "priority": comment.priority,
+            "impact": comment.impact,
+            "content": comment.content,
+        }
+        for comment in comments[:LLM_VERDICT_MAX_COMMENTS]
+    ]
+    return (
+        "You are the meta-reviewer's Adjudicator. Your job is to read "
+        "reviewer concerns about a document and decide a single go/no-go "
+        "verdict for the author.\n\n"
+        "Document excerpt (truncated if long):\n"
+        "---\n"
+        f"{excerpt}\n"
+        "---\n\n"
+        "Reviewer concerns (top ranked):\n"
+        f"{json.dumps(compact, indent=2)}\n\n"
+        "Return ONLY a JSON object with these exact keys — no prose, no "
+        "markdown, no commentary outside the JSON:\n"
+        "{\n"
+        '  "verdict": one of "clean" | "review_needed" | "problems",\n'
+        '  "bottom_line": one sentence (under 25 words) stating your '
+        "overall judgment in plain language,\n"
+        '  "top_blockers": array of up to 3 short blocker strings '
+        "(each under 15 words); empty array if the verdict is "
+        '"clean" or there are no blockers.\n'
+        "}\n\n"
+        "Rules for verdict:\n"
+        '- "clean" means no action needed; the document is ready.\n'
+        '- "review_needed" means quality improvements are warranted '
+        "but nothing blocks shipping.\n"
+        '- "problems" means the document has at least one issue that '
+        "should block shipping until addressed (factual error, "
+        "security/compliance risk, broken claim, critical gap, etc.)."
+    )
+
+
+def _parse_llm_verdict_response(raw: str) -> dict | None:
+    """Parse the LLM's JSON response into the verdict contract.
+
+    Returns None when the response is unparseable or missing required
+    fields; the caller falls back to the rule-based heuristic. We
+    tolerate leading/trailing whitespace and an optional ```json fence
+    since smaller models occasionally wrap despite the instructions.
+    """
+    text = raw.strip()
+    if text.startswith("```"):
+        # Strip an opening fence and optional language tag, plus a closing fence.
+        text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    verdict = parsed.get("verdict")
+    if verdict not in VALID_VERDICTS:
+        return None
+    bottom_line = parsed.get("bottom_line")
+    if not isinstance(bottom_line, str) or not bottom_line.strip():
+        return None
+    raw_blockers = parsed.get("top_blockers", [])
+    if not isinstance(raw_blockers, list):
+        return None
+    top_blockers: list[str] = []
+    for item in raw_blockers[:3]:
+        if isinstance(item, str) and item.strip():
+            top_blockers.append(item.strip())
+    return {
+        "verdict": verdict,
+        "bottom_line": bottom_line.strip(),
+        "top_blockers": top_blockers,
+    }
+
+
+def _synthesize_llm_verdict(
+    comments: list[models.MetaComment], content: str
+) -> dict | None:
+    """Run the LLM verdict-synthesis pass; return None on any failure.
+
+    Callers compose this with the rule-based helper: if this returns
+    None the rule-based verdict still lights up the summary so the UI
+    never shows a blank panel when the provider is unreachable.
+    """
+    if not comments:
+        return None
+    if not getattr(settings, "META_VERDICT_USE_LLM", True):
+        return None
+    try:
+        raw = generate_completion(_llm_verdict_prompt(comments, content))
+    except LLMProviderError as exc:
+        logger.info("meta_llm_verdict_failed reason=provider_error detail=%s", exc)
+        return None
+    except Exception:
+        logger.exception("meta_llm_verdict_failed reason=unexpected")
+        return None
+    parsed = _parse_llm_verdict_response(raw or "")
+    if parsed is None:
+        logger.info("meta_llm_verdict_failed reason=parse_error")
+        return None
+    return parsed
+
+
 def _build_summary_payload(run: models.MetaReviewRun, content: str) -> dict | None:
     if run.status != "completed":
         return None
@@ -224,7 +346,23 @@ def _build_summary_payload(run: models.MetaReviewRun, content: str) -> dict | No
     comments = list(run.comments)
     sections = _build_sections(content)
     clean_sections = _clean_sections_for_comments(sections, comments)
-    verdict = _verdict_for_comments(comments)
+
+    # Try LLM synthesis first; fall back to the rule-based verdict if
+    # the provider is unavailable, times out, or returns malformed JSON.
+    # Attention points + clean sections come from the deterministic
+    # helpers either way so the UI stays stable across fallbacks.
+    llm_result = _synthesize_llm_verdict(comments, content)
+    if llm_result is not None:
+        verdict = llm_result["verdict"]
+        bottom_line: str | None = llm_result["bottom_line"]
+        top_blockers: list[str] = llm_result["top_blockers"]
+        synthesized_by_llm = True
+    else:
+        verdict = _verdict_for_comments(comments)
+        bottom_line = None
+        top_blockers = []
+        synthesized_by_llm = False
+
     attention_points = []
     for comment in comments[:5]:
         attention_points.append(
@@ -241,9 +379,12 @@ def _build_summary_payload(run: models.MetaReviewRun, content: str) -> dict | No
 
     return {
         "verdict": verdict,
+        "bottom_line": bottom_line,
+        "top_blockers": top_blockers,
         "attention_points": attention_points,
         "clean_sections": clean_sections,
         "clean_statement": _clean_statement(verdict, clean_sections),
+        "synthesized_by_llm": synthesized_by_llm,
     }
 
 
