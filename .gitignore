@@ -34,3 +34,7 @@ frontend/.env.development.local
 frontend/.env.test.local
 frontend/.env.production.local
 agents_local/
+.clawpatch/*
+node_modules/
+package-lock.json
+
