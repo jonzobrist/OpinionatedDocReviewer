@@ -25,3 +25,31 @@ API base resolution order:
 1. `localStorage` key `odr_api_base` (System -> Client Connection)
 2. `NEXT_PUBLIC_API_BASE`
 3. Browser origin fallback: `${window.location.origin}/api`
+
+
+## Dependency updates
+
+Use Bun 1.4.3 (matching CI). Keep both lockfiles in every dependency PR:
+
+```bash
+npm install --package-lock-only --ignore-scripts
+bash scripts/sync-bun-lock.sh
+bash scripts/sync-bun-lock.sh --check
+bun install --frozen-lockfile
+bun run test
+bun run build
+npm audit --audit-level=high
+```
+
+`package-lock.json` is the resolution source; `sync-bun-lock.sh` imports it in a
+clean temporary directory to generate `bun.lock`. It first uses an npm dry-run
+to reject stale overrides and verifies every imported package version against
+npm, plus integrity hashes wherever npm records them. Legacy npm entries without
+integrity get version parity checks only. This verifies the package inventory,
+not identical hoisting or dependency-edge placement. CI checks the generated file
+before installing so security audits and Bun execution use matching resolutions.
+Do not hand-edit integrity hashes or resolved lockfile entries.
+
+The sharp override keeps Next.js image processing on sharp 0.35.4 or newer within
+the compatible 0.35 series. Node-based installs need Node >=20.9 for sharp; the
+current Vite test toolchain additionally requires Node >=20.19 or >=22.12.
