@@ -432,3 +432,13 @@ If `origin` already exists, update it:
 git remote set-url origin git@github.com:<your-user>/<your-repo>.git
 git push -u origin main
 ```
+
+
+## Dependency security checks
+
+The backend audit exports runtime dependencies from `backend/uv.lock` with
+`uv export --locked --no-dev --no-emit-project`, then runs pip-audit against that
+explicit hashed requirements file. It does not audit the isolated pip-audit tool
+environment. `--locked` fails if project metadata and the lockfile are stale.
+Frontend dependency updates must regenerate both npm and Bun lockfiles; see
+[the frontend dependency workflow](frontend/README.md#dependency-updates).

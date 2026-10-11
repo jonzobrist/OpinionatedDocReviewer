@@ -4,7 +4,7 @@ from app.core.config import settings
 def test_local_auth_register_verify_login_and_reset_flow(client, monkeypatch) -> None:
     monkeypatch.setattr(settings, "AUTH_MODE", "local")
     monkeypatch.setattr(settings, "AUTH_DEV_ECHO_CODES", True)
-    monkeypatch.setattr(settings, "LOCAL_AUTH_JWT_SECRET", "unit-test-secret")
+    monkeypatch.setattr(settings, "LOCAL_AUTH_JWT_SECRET", "unit-test-secret-at-least-32-bytes")
 
     register_resp = client.post(
         "/api/auth/register",
@@ -117,7 +117,7 @@ def test_local_auth_register_verify_login_and_reset_flow(client, monkeypatch) ->
 def test_local_auth_allows_project_admin_on_admin_routes(client, monkeypatch) -> None:
     monkeypatch.setattr(settings, "AUTH_MODE", "local")
     monkeypatch.setattr(settings, "AUTH_DEV_ECHO_CODES", True)
-    monkeypatch.setattr(settings, "LOCAL_AUTH_JWT_SECRET", "unit-test-secret")
+    monkeypatch.setattr(settings, "LOCAL_AUTH_JWT_SECRET", "unit-test-secret-at-least-32-bytes")
 
     register = client.post(
         "/api/auth/register",

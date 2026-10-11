@@ -22,25 +22,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-      - name: Install backend deps
+      - name: Export locked backend dependencies
         run: |
           cd backend
-          uv sync
+          uv export --locked --no-dev --no-emit-project --format requirements-txt --output-file "$RUNNER_TEMP/backend-requirements.txt"
       - name: Run pip-audit
         run: |
           cd backend
-          uv tool run pip-audit --strict
+          uv tool run pip-audit --strict --require-hashes --disable-pip -r "$RUNNER_TEMP/backend-requirements.txt"
 
   frontend-audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"
+      - name: Check npm and Bun lockfile alignment
+        run: bash frontend/scripts/sync-bun-lock.sh --check
       - name: Install frontend deps
         run: |
           cd frontend
           bun install --frozen-lockfile
+          npm ls --all
       - name: Run npm audit
         run: |
           cd frontend
-          npm audit --audit-level=high
+          npm audit --audit-level=low

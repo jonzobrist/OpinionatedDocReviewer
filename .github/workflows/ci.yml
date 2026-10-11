@@ -13,29 +13,42 @@ jobs:
       - name: Install backend deps
         run: |
           cd backend
-          uv sync --extra test
+          uv sync --locked --extra test
       - name: Run Track-1 review-contract regression tests (M2 gate)
         run: |
           cd backend
-          uv run pytest tests/test_review_prompt.py tests/test_review_parsing.py tests/test_review_worker.py tests/test_personas.py
+          uv run --locked pytest tests/test_review_prompt.py tests/test_review_parsing.py tests/test_review_worker.py tests/test_personas.py
       - name: Run backend tests (includes OpenAI/Bedrock provider smoke tests)
         run: |
           cd backend
-          uv run pytest
+          uv run --locked pytest
 
   frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Test dependency tooling
+        run: |
+          python3 -m unittest discover -s scripts/tests -p test_dependency_setup.py
+          node --test frontend/scripts/check-lock-inventory.test.mjs
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"
+      - name: Check npm and Bun lockfile alignment
+        run: bash frontend/scripts/sync-bun-lock.sh --check
       - name: Install frontend deps
         run: |
           cd frontend
           bun install --frozen-lockfile
+          npm ls --all
       - name: Run frontend tests
         run: |
           cd frontend
           bun run test
+      - name: Typecheck frontend
+        run: |
+          cd frontend
+          bun run typecheck
       - name: Build frontend
         run: |
           cd frontend

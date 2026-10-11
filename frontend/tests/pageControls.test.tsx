@@ -918,12 +918,13 @@ describe('page controls', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Meta' }));
-    let directiveCard: Element | null = null;
-    await waitFor(() => {
-      directiveCard = document.querySelector('.comment-card[data-meta-id="9501"]');
+    const directiveCard = await waitFor(() => {
+      const directiveCard = document.querySelector<HTMLElement>('.comment-card[data-meta-id="9501"]');
       expect(directiveCard).toBeTruthy();
+      if (!directiveCard) throw new Error('Expected meta directive card #9501');
+      return directiveCard;
     });
-    fireEvent.click(directiveCard as HTMLElement);
+    fireEvent.click(directiveCard);
     await waitFor(() => {
       const urls = replaceMock.mock.calls.map((call) => String(call[0]));
       expect(urls.some((url) => url.includes('mode=meta') && url.includes('directive=9501'))).toBe(true);
