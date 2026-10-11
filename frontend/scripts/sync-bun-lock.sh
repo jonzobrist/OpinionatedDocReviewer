@@ -28,7 +28,9 @@ trap 'rm -rf "$temporary"' EXIT
 cp "$frontend/package.json" "$frontend/package-lock.json" "$temporary/"
 (
   cd "$temporary"
-  # npm validates overrides and transitive resolutions, not just root specs.
+  # Check npm installability before importing the audited resolution.
+  # Peer/override warnings may be nonfatal; CI validates the installed
+  # graph with npm ls --all after the frozen Bun install.
   npm ci --dry-run --ignore-scripts --no-audit --no-fund
   bun install --lockfile-only --ignore-scripts
 )

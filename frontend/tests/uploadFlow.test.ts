@@ -1,11 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '../src/lib/api';
 
 
 describe('upload flow', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it('creates doc, version, and review job in order', async () => {
     const calls: string[] = [];
-    const mockFetch = vi.fn(async (url: string) => {
+    const mockFetch: typeof fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
       calls.push(url);
       if (url.endsWith('/documents')) {
         return new Response(JSON.stringify({ id: 1 }), { status: 201 });
@@ -17,10 +20,9 @@ describe('upload flow', () => {
         return new Response(JSON.stringify({ id: 100, status: 'queued' }), { status: 201 });
       }
       return new Response('{}', { status: 200 });
-    }) as unknown as typeof fetch;
+    });
 
-    // @ts-expect-error test override
-    global.fetch = mockFetch;
+    vi.stubGlobal('fetch', mockFetch);
 
     await apiFetch('/documents', { method: 'POST', body: JSON.stringify({ title: 'Doc' }) });
     await apiFetch('/documents/1/versions', { method: 'POST', body: JSON.stringify({ version_label: 'Initial upload', content: 'x' }) });

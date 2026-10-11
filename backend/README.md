@@ -1,8 +1,37 @@
 # Backend API
 
+## Runtime and dependency installation
+
+Use Python 3.11 or newer and install the committed dependency graph with uv:
+
+```bash
+uv sync --locked
+```
+
+The security baseline requires FastAPI 0.133+ (Starlette 1.x support),
+Starlette 1.3.1+, AnyIO 4.14.2+, Pydantic Settings 2.14.2+,
+PyJWT 2.15.1+, cryptography 50+, and urllib3 2.8+.
+`uv.lock` records the exact tested releases; retain `--locked` in CI and deployments.
+These minimums are also declared in `pyproject.toml` so an unlocked installation
+cannot silently resolve the vulnerable versions this update replaces.
+
+Platform changes in [cryptography 47–50](https://cryptography.io/en/latest/changelog/):
+- Intel (`x86_64`) macOS and 32-bit Windows are no longer supported upstream.
+  Use a supported Linux deployment, Apple Silicon macOS, or 64-bit Windows.
+- Source builds require OpenSSL 3.0+ and Rust 1.83+; published wheels bundle OpenSSL.
+  Prefer wheels on supported platforms.
+- Python 3.11 remains supported. The dependency updates do not raise this project's
+  Python minimum.
+
+OIDC deployments must point `OIDC_JWKS_URL` directly at the final HTTP(S) JWKS
+endpoint: PyJWT rejects redirects and other URI schemes. Publish rotated keys
+before issuing tokens that use them; unknown key IDs are subject to PyJWT's
+default 30-second refresh cooldown. Local HS256 authentication should use a
+random `LOCAL_AUTH_JWT_SECRET` with at least 32 bytes.
+
 ## Run (local)
 ```bash
-python -m app.main
+uv run --locked python -m app.main
 ```
 
 ## Worker (reviews)
@@ -12,7 +41,7 @@ Workers are optional for scale; enable `REVIEW_INLINE=false` to use the queue.
 Requires Redis (default `redis://localhost:6379/0`) and an LLM provider configuration.
 
 ```bash
-python -m app.worker
+uv run --locked python -m app.worker
 ```
 
 ## API Notes
@@ -88,7 +117,20 @@ References:
 
 ## Tests
 ```bash
-pytest
+uv sync --locked --extra test
+uv run --locked pytest
+```
+
+The auth regressions exercise real HS256/RS256 signatures, JWKS parsing and cache
+behavior, invalid claims, and preservation of caller-supplied JWT options.
+The Bedrock smoke test uses the real Boto3/Botocore/urllib3 HTTP stack with fake
+credentials and a loopback endpoint; it does not call AWS.
+
+Audit the hashed, locked runtime graph (the same inventory deployed by uv):
+
+```bash
+uv export --locked --no-dev --no-emit-project --format requirements-txt --output-file /tmp/backend-requirements.txt
+uv tool run pip-audit --strict --require-hashes --disable-pip -r /tmp/backend-requirements.txt
 ```
 
 ## Reverse Proxy Deployment
@@ -141,7 +183,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 sudo mkdir -p /opt/OpinionatedDocReviewer
 sudo chown -R "$USER":"$USER" /opt/OpinionatedDocReviewer
 git clone https://github.com/jonzobrist/OpinionatedDocReviewer.git /opt/OpinionatedDocReviewer
-cd /opt/OpinionatedDocReviewer/backend && uv sync
+cd /opt/OpinionatedDocReviewer/backend && uv sync --locked
 cd /opt/OpinionatedDocReviewer/frontend && bun install --frozen-lockfile && bun run build
 ```
 

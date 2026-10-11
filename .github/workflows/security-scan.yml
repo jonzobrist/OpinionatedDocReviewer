@@ -44,7 +44,8 @@ jobs:
         run: |
           cd frontend
           bun install --frozen-lockfile
+          npm ls --all
       - name: Run npm audit
         run: |
           cd frontend
-          npm audit --audit-level=high
+          npm audit --audit-level=low
