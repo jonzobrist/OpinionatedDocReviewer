@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import get_db, get_tenant_id
+from app.api.deps import get_db, get_tenant_id, get_request_user, require_document_permission
 from app.core.config import settings
 from app.db import models
 from app.reviews.llm_provider import LLMProviderError, generate_completion
@@ -63,7 +63,9 @@ def _load_run(
     )
 
 
-def _ensure_document_version_exists(db: Session, tenant_id: str, document_version_id: int) -> None:
+def _ensure_document_version_exists(
+    db: Session, tenant_id: str, document_version_id: int
+) -> models.DocumentVersion:
     version = (
         db.query(models.DocumentVersion)
         .filter(
@@ -74,6 +76,7 @@ def _ensure_document_version_exists(db: Session, tenant_id: str, document_versio
     )
     if not version:
         raise HTTPException(status_code=404, detail="Document version not found")
+    return version
 
 
 def _prepare_run_for_response(run: models.MetaReviewRun) -> models.MetaReviewRun:
@@ -418,8 +421,10 @@ def create_meta_review(
     payload: MetaReviewCreate,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
+    user: models.User = Depends(get_request_user),
 ) -> dict:
-    _ensure_document_version_exists(db, tenant_id, payload.document_version_id)
+    version = _ensure_document_version_exists(db, tenant_id, payload.document_version_id)
+    require_document_permission(db, tenant_id, user, version.document_id, "editor")
     try:
         run = run_meta_review(
             db=db,
@@ -455,8 +460,10 @@ def ensure_meta_review(
     payload: MetaReviewEnsureRequest,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
+    user: models.User = Depends(get_request_user),
 ) -> dict:
-    _ensure_document_version_exists(db, tenant_id, payload.document_version_id)
+    version = _ensure_document_version_exists(db, tenant_id, payload.document_version_id)
+    require_document_permission(db, tenant_id, user, version.document_id, "editor")
     try:
         ensured = ensure_meta_review_run(
             db=db,
@@ -497,7 +504,10 @@ def get_latest_meta_review(
     include_comments: bool = Query(default=True),
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
+    user: models.User = Depends(get_request_user),
 ) -> dict:
+    version = _ensure_document_version_exists(db, tenant_id, document_version_id)
+    require_document_permission(db, tenant_id, user, version.document_id, "viewer")
     query = db.query(models.MetaReviewRun).filter(
         models.MetaReviewRun.tenant_id == tenant_id,
         models.MetaReviewRun.document_version_id == document_version_id,

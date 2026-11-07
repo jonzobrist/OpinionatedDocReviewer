@@ -199,3 +199,17 @@ curl -sS http://127.0.0.1:8006/api/status
 ```
 
 If review jobs remain `queued`, focus on `opdr-worker` logs first.
+
+## Persona management permissions
+
+Persona and persona-group create/update/delete operations, persona bundle imports
+(including dry runs), and default resets require `admin`, `project_admin`, or
+`system_admin`. Authenticated tenant users can still read persona configuration
+and export bundles. Built-in identity flags are server-managed: API clients cannot
+create or convert personas with `is_default`/`is_system_locked`. Built-ins can be
+edited, disabled, or reset, but cannot be deleted. Group assignments must reference
+a group in the same tenant.
+
+Meta-review creation and ensure (including force/reuse requests) require editor
+permission on the owning document. Latest-result reads require viewer permission,
+including metadata-only requests. Explicit deny policies still override grants.

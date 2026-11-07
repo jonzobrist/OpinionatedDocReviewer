@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_tenant_id
+from app.api.deps import get_db, get_tenant_id, require_admin_user
 from app.crud.persona import (
     create_persona,
     delete_persona,
@@ -53,7 +53,12 @@ def list_all(
     return list_personas(db, tenant_id)
 
 
-@router.post("", response_model=PersonaRead, status_code=201)
+@router.post(
+    "",
+    response_model=PersonaRead,
+    status_code=201,
+    dependencies=[Depends(require_admin_user)],
+)
 def create(
     payload: PersonaCreate,
     db: Session = Depends(get_db),
@@ -74,7 +79,11 @@ def get_one(
     return persona
 
 
-@router.patch("/{persona_id}", response_model=PersonaRead)
+@router.patch(
+    "/{persona_id}",
+    response_model=PersonaRead,
+    dependencies=[Depends(require_admin_user)],
+)
 def update(
     persona_id: int,
     payload: PersonaUpdate,
@@ -87,7 +96,7 @@ def update(
     return persona
 
 
-@router.delete("/{persona_id}", status_code=204)
+@router.delete("/{persona_id}", status_code=204, dependencies=[Depends(require_admin_user)])
 def delete(
     persona_id: int,
     db: Session = Depends(get_db),
@@ -98,7 +107,11 @@ def delete(
         raise HTTPException(status_code=404, detail="Persona not found")
 
 
-@router.post("/reset-defaults", response_model=list[PersonaRead])
+@router.post(
+    "/reset-defaults",
+    response_model=list[PersonaRead],
+    dependencies=[Depends(require_admin_user)],
+)
 def reset_defaults(
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
@@ -108,7 +121,11 @@ def reset_defaults(
     return list_personas(db, tenant_id)
 
 
-@router.post("/{persona_id}/reset-default", response_model=PersonaRead)
+@router.post(
+    "/{persona_id}/reset-default",
+    response_model=PersonaRead,
+    dependencies=[Depends(require_admin_user)],
+)
 def reset_one_default(
     persona_id: int,
     db: Session = Depends(get_db),
@@ -157,7 +174,11 @@ def export_personas(
     )
 
 
-@router.post("/bundle/import", response_model=PersonaImportResult)
+@router.post(
+    "/bundle/import",
+    response_model=PersonaImportResult,
+    dependencies=[Depends(require_admin_user)],
+)
 def import_personas(
     payload: PersonaImportRequest,
     db: Session = Depends(get_db),

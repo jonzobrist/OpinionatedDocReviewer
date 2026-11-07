@@ -1,10 +1,25 @@
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import models
 from app.schemas.persona import PersonaCreate, PersonaUpdate
 
 
+def _validate_group(db: Session, tenant_id: str, group_id: int | None) -> None:
+    if group_id is None:
+        return
+    group = db.query(models.PersonaGroup).filter(
+        models.PersonaGroup.id == group_id,
+        models.PersonaGroup.tenant_id == tenant_id,
+    ).first()
+    if group is None:
+        raise HTTPException(status_code=404, detail="Persona group not found")
+
+
 def create_persona(db: Session, tenant_id: str, data: PersonaCreate) -> models.Persona:
+    if data.is_default or data.is_system_locked:
+        raise HTTPException(status_code=422, detail="Built-in persona flags are server-managed")
+    _validate_group(db, tenant_id, data.group_id)
     persona = models.Persona(
         tenant_id=tenant_id,
         name=data.name,
@@ -55,6 +70,11 @@ def update_persona(
     if not persona:
         return None
     update_data = data.model_dump(exclude_unset=True)
+    for flag in ("is_default", "is_system_locked"):
+        if flag in update_data and update_data[flag] != getattr(persona, flag):
+            raise HTTPException(status_code=422, detail="Built-in persona flags are server-managed")
+    if "group_id" in update_data:
+        _validate_group(db, tenant_id, update_data["group_id"])
     if "output_requirements" in update_data and update_data["output_requirements"] is not None:
         update_data["output_requirements"] = update_data["output_requirements"]
     for key, value in update_data.items():
@@ -68,6 +88,8 @@ def delete_persona(db: Session, tenant_id: str, persona_id: int) -> bool:
     persona = get_persona(db, tenant_id, persona_id)
     if not persona:
         return False
+    if persona.is_default or persona.is_system_locked:
+        raise HTTPException(status_code=409, detail="Built-in personas cannot be deleted; disable instead")
     db.delete(persona)
     db.commit()
     return True

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_tenant_id
+from app.api.deps import get_db, get_tenant_id, require_admin_user
 from app.crud.persona_group import (
     create_group,
     delete_group,
@@ -26,7 +26,12 @@ def list_all(
     return list_groups(db, tenant_id)
 
 
-@router.post("", response_model=PersonaGroupRead, status_code=201)
+@router.post(
+    "",
+    response_model=PersonaGroupRead,
+    status_code=201,
+    dependencies=[Depends(require_admin_user)],
+)
 def create(
     payload: PersonaGroupCreate,
     db: Session = Depends(get_db),
@@ -47,7 +52,11 @@ def get_one(
     return group
 
 
-@router.patch("/{group_id}", response_model=PersonaGroupRead)
+@router.patch(
+    "/{group_id}",
+    response_model=PersonaGroupRead,
+    dependencies=[Depends(require_admin_user)],
+)
 def update(
     group_id: int,
     payload: PersonaGroupUpdate,
@@ -60,7 +69,7 @@ def update(
     return group
 
 
-@router.delete("/{group_id}", status_code=204)
+@router.delete("/{group_id}", status_code=204, dependencies=[Depends(require_admin_user)])
 def delete(
     group_id: int,
     db: Session = Depends(get_db),
